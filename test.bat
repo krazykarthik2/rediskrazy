@@ -1,0 +1,1 @@
+cd TESTING && python test.py && cd ..

@@ -1,0 +1,17 @@
+C:\Users\karthikkrazy\rediskrazy\server.c:5: warning: ignoring '#pragma comment ' [-Wunknown-pragmas]
+    5 | #pragma comment(lib, "ws2_32.lib")
+      | 
+C:\Users\karthikkrazy\rediskrazy\server.c: In function 'set_kv':
+C:\Users\karthikkrazy\rediskrazy\server.c:73:12: warning: variable 'prev' set but not used [-Wunused-but-set-variable]
+   73 |     Entry *prev = NULL;
+      |            ^~~~
+C:\Users\karthikkrazy\rediskrazy\server.c: In function 'main':
+C:\Users\karthikkrazy\rediskrazy\server.c:354:21: warning: this 'for' clause does not guard... [-Wmisleading-indentation]
+  354 |                     for (int k=0;k<argc2;k++) free(argv2[k]); free(argv2);
+      |                     ^~~
+C:\Users\karthikkrazy\rediskrazy\server.c:354:63: note: ...this statement, but the latter is misleadingly indented as if it were guarded by the 'for'
+  354 |                     for (int k=0;k<argc2;k++) free(argv2[k]); free(argv2);
+      |                                                               ^~~~
+C:\Users\karthikkrazy\rediskrazy\server.c:290:9: warning: unused variable 'client_count' [-Wunused-variable]
+  290 |     int client_count = 0;
+      |         ^~~~~~~~~~~~

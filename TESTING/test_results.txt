@@ -1,0 +1,73 @@
+DEBUG: Calling test_protocol
+--- Testing Protocol (PING/SET/GET) ---
+Connected to 127.0.0.1:6379
+REQ: *1
+$4
+PING
+RES: +PONG
+REQ: *3
+$3
+SET
+$5
+mykey
+$7
+isvalid
+RES: +OK
+REQ: *2
+$3
+GET
+$5
+mykey
+RES: $7
+isvalid
+DEBUG: Calling test_db_ops
+--- Testing DB Ops (DEL/EXISTS) ---
+Connected to 127.0.0.1:6379
+REQ: *3
+$3
+SET
+$4
+test
+$3
+val
+RES: +OK
+REQ: *2
+$6
+EXISTS
+$4
+test
+RES: :1
+REQ: *2
+$6
+EXISTS
+$6
+nokey1
+RES: :0
+REQ: *2
+$3
+DEL
+$4
+test
+RES: :1
+REQ: *2
+$6
+EXISTS
+$4
+test
+RES: :0
+REQ: *2
+$3
+DEL
+$4
+test
+RES: :0
+DEBUG: Calling test_persistence
+--- Testing Persistence (AOF Verification) ---
+
+==============================
+       TEST REPORT       
+==============================
+multitesting: valid
+db_ops: valid
+persistence: valid
+==============================
