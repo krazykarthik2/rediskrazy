@@ -7,7 +7,7 @@
 // Parse RESP array.
 // Returns > 0 (bytes consumed) if successful, 0 if incomplete, -1 on error.
 // argv_out is allocated and must be freed by caller (deep free).
-int resp_parse_array(const char *in, int in_len, char ***argv_out, int *argc_out);
+int resp_parse_array(const char *in, int in_len, char ***argv_out, int **arglens_out, int *argc_out);
 
 // Free argv array
 void resp_free_argv(char **argv, int argc);

@@ -19,6 +19,7 @@ void dict_init(Dict *h, size_t n) {
     while (pow2 < n) pow2 *= 2;
     h->mask = pow2 - 1;
     h->tab = (DictEntry**)calloc(pow2, sizeof(DictEntry*));
+    if (h->tab) memset(h->tab, 0, pow2 * sizeof(DictEntry*));
 }
 
 static void dict_resize(Dict *h) {
@@ -187,4 +188,11 @@ void dict_destroy(Dict *h) {
     h->tab = NULL;
     h->size = 0;
     h->mask = 0;
+}
+
+int dict_set_expiry(Dict *h, const char *key, size_t key_len, time_t ttl_seconds) {
+    DictEntry *e = dict_lookup_node(h, key, key_len);
+    if (!e) return 0; // Key not found
+    e->expire = ttl_seconds > 0 ? time(NULL) + ttl_seconds : 0;
+    return 1;
 }

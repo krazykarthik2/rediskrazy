@@ -42,6 +42,10 @@ void dict_clear(Dict *d);
 int dict_active_expire(Dict *d, int n_buckets);
 
 // Destructor (optional, for clean shutdown)
+// Destructor (optional, for clean shutdown)
 void dict_destroy(Dict *d);
+
+// Update expiry for existing key
+int dict_set_expiry(Dict *d, const char *key, size_t key_len, time_t ttl_seconds);
 
 #endif

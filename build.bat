@@ -17,7 +17,7 @@ echo ========================================
 
 rem Compile Server
 echo Compiling server...
-gcc -O2 -Wall -Wextra "%SOURCE_DIR%\dict.c" "%SOURCE_DIR%\resp.c" "%SOURCE_DIR%\server.c" -o "%OUTPUT_DIR%\server.exe" -lws2_32
+gcc -O2 -Wall -Wextra "%SOURCE_DIR%\dict.c" "%SOURCE_DIR%\rdb.c" "%SOURCE_DIR%\ae.c" "%SOURCE_DIR%\resp.c" "%SOURCE_DIR%\avl.c" "%SOURCE_DIR%\zset.c" "%SOURCE_DIR%\server.c" -o "%OUTPUT_DIR%\server.exe" -lws2_32
 if errorlevel 1 (
     echo [ERROR] Failed to compile server.
     exit /b 1

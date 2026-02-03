@@ -1,1 +1,1 @@
-cd TESTING && python test.py && cd ..
+cd TESTING && python test_zset.py && cd ..

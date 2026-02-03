@@ -17,17 +17,17 @@
 - [x] Single-threaded event loop
 - [x] File descriptor registration
 - [x] Read events
-- [ ] Write events
-- [ ] Callback-based dispatch
+- [x] Write events
+- [x] Callback-based dispatch
 - [x] Non-blocking sockets
 
 ---
 
 ### 🧱 Step 2: Event Loop (Part 2)
-- [ ] Timer events
-- [ ] Time-based callbacks
+- [x] Timer events
+- [x] Time-based callbacks
 - [ ] Event prioritization
-- [ ] Safe event removal
+- [x] Safe event removal
 - [ ] Graceful shutdown handling
 
 ---
@@ -65,7 +65,7 @@
 ---
 
 ### 🧱 Step 6: Data Serialization
-- [ ] Binary-safe encoding
+- [x] Binary-safe encoding
 - [ ] Command serialization
 - [ ] Snapshot encoding
 - [ ] AOF compatibility
@@ -73,31 +73,39 @@
 ---
 
 ### 🧱 Step 7: Balanced Binary Tree
-- [ ] AVL or Red-Black Tree
-- [ ] Insert / delete / search
-- [ ] Range queries
-- [ ] Ordered traversal
+- [x] AVL or Red-Black Tree
+- [x] Insert / delete / search
+- [x] Range queries
+- [x] Ordered traversal
 
 ---
 
 ### 🧱 Step 8: Sorted Set
-- [ ] Score–member model
-- [ ] Hash table backing
-- [ ] Balanced tree ordering
-- [ ] Commands
-  - [ ] ZADD
-  - [ ] ZRANGE
-  - [ ] ZSCORE
+- [x] Score–member model
+- [x] Hash table backing
+- [x] Balanced tree ordering
+- [x] Commands
+  - [x] ZADD
+  - [x] ZRANGE
+  - [x] ZSCORE
 
 ---
 
 ## Part 4️⃣ Time, Expiration & Caching
 
 ### 🧱 Step 9: Timer and Timeout
-- [ ] Timer manager
-- [ ] Millisecond precision
-- [ ] Nearest-timer lookup
-- [ ] Event loop integration
+- [x] Timer manager
+- [x] Millisecond precision
+- [x] Nearest-timer lookup
+- [x] Event loop integration
+
+---
+
+### 🧱 Step 9: Timer and Timeout
+- [x] Timer manager
+- [x] Millisecond precision
+- [x] Nearest-timer lookup
+- [x] Event loop integration
 
 ---
 
@@ -115,8 +123,8 @@
 ### 🧱 Step 11: Persistence
 - [x] Append-Only File (AOF)
   - [x] Command logging
-  - [ ] AOF rewrite
-- [ ] Snapshotting (RDB-style)
+  - [x] AOF rewrite
+- [x] Snapshotting (RDB-style)
 
 ---
 
