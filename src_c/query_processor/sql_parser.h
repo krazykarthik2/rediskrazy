@@ -6,12 +6,14 @@
 #include "schema_manager.h"
 
 typedef struct {
-    int type; // 0: SELECT, 1: INSERT, 2: DELETE, 3: UPDATE, 4: CREATE_DB, 5: CREATE_TABLE
+    int type; // 0: SELECT, 1: INSERT, 2: DELETE, 3: UPDATE, 4: CREATE_DB, 5: CREATE_TABLE, 6: USE, 7: LIST, 8: CLEAR
     sds key;
     sds val;
     sds table;
     int num_cols;
     Column *cols;
+    int num_vals;
+    sds *vals;
 } SQLQuery;
 
 typedef struct {

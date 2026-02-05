@@ -23,6 +23,13 @@ SQLResult process_sql(const char *sql) {
         free(q.cols);
     }
     
+    if (q.vals) {
+        for (int i = 0; i < q.num_vals; i++) {
+            sdsfree(q.vals[i]);
+        }
+        free(q.vals);
+    }
+    
     parser_free(&p);
     return res;
 }

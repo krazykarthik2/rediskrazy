@@ -13,7 +13,7 @@ typedef struct {
     char *name;
     DataType type;
     int not_null;
-    // Potentially primary key, etc.
+    int is_primary;
 } Column;
 
 typedef struct {
@@ -36,10 +36,17 @@ typedef struct {
 
 // Global or context-based schema management
 void schema_init(void);
+int set_active_database(const char *name);
+Database* get_active_database(void);
 int create_database(const char *name);
 int create_table(const char *db_name, const char *table_name, Column *cols, int num_cols);
 Database* get_database(const char *name);
 Table* get_table(Database *db, const char *name);
+
+// Meta-info
+char** list_databases(int *count);
+char** list_tables(const char *db_name, int *count);
+
 void schema_free(void);
 
 #endif

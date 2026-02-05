@@ -88,6 +88,14 @@ Token lexer_next(Lexer *l) {
         else if (strcasecmp(text, "CREATE") == 0) type = TOKEN_KEYWORD_CREATE;
         else if (strcasecmp(text, "DATABASE") == 0) type = TOKEN_KEYWORD_DATABASE;
         else if (strcasecmp(text, "TABLE") == 0) type = TOKEN_KEYWORD_TABLE;
+        else if (strcasecmp(text, "USE") == 0) type = TOKEN_KEYWORD_USE;
+        else if (strcasecmp(text, "LIST") == 0) type = TOKEN_KEYWORD_LIST;
+        else if (strcasecmp(text, "DATABASES") == 0) type = TOKEN_KEYWORD_DATABASES;
+        else if (strcasecmp(text, "TABLES") == 0) type = TOKEN_KEYWORD_TABLES;
+        else if (strcasecmp(text, "PRIMARY") == 0) type = TOKEN_KEYWORD_PRIMARY;
+        else if (strcasecmp(text, "KEY") == 0) type = TOKEN_KEYWORD_KEY;
+        else if (strcasecmp(text, "CLEAR") == 0) type = TOKEN_KEYWORD_CLEAR;
+        else if (strcasecmp(text, "CLS") == 0) type = TOKEN_KEYWORD_CLS;
         else if (strcasecmp(text, "INT") == 0) type = TOKEN_KEYWORD_INT;
         else if (strcasecmp(text, "VARCHAR") == 0) type = TOKEN_KEYWORD_VARCHAR;
         else if (strcasecmp(text, "NOT") == 0) {

@@ -57,16 +57,19 @@ static void execute_redis_cmd(SQLResult *res) {
     int n = recv(sock, buf, sizeof(buf)-1, 0);
     if (n > 0) {
         buf[n] = 0;
+        
+        // If it was just a PING (placeholder), don't overwrite our local results
+        if (strcmp(res->redis_cmd, "PING") == 0) goto cleanup;
+
         // Simple RESP parsing for the table
         if (buf[0] == '+') {
-            // +OK
             if (res->num_rows > 0 && res->num_cols > 0) {
                 free(res->rows[0][0]);
                 res->rows[0][0] = strdup(buf + 1);
                 res->rows[0][0][strcspn(res->rows[0][0], "\r\n")] = 0;
             }
         } else if (buf[0] == '$') {
-            // $len\r\nval\r\n
+            // Bulk String
             char *p = strstr(buf, "\r\n");
             if (p) {
                 p += 2;
@@ -76,10 +79,40 @@ static void execute_redis_cmd(SQLResult *res) {
                     free(res->rows[0][1]);
                     res->rows[0][1] = strdup(p);
                 }
-            } else {
-                if (res->num_rows > 0 && res->num_cols > 1) {
-                    free(res->rows[0][1]);
-                    res->rows[0][1] = strdup("NULL");
+            }
+        } else if (buf[0] == '*') {
+            // RESP Array (used for HGETALL result)
+            int num_elements = atoi(buf + 1);
+            char *current = strstr(buf, "\r\n");
+            if (!current) goto cleanup;
+            current += 2;
+            
+            for (int i = 0; i < num_elements; i++) {
+                if (current[0] == '$') {
+                    int len = atoi(current + 1);
+                    current = strstr(current, "\r\n");
+                    if (!current) break;
+                    current += 2;
+                    
+                    char *val = malloc(len + 1);
+                    memcpy(val, current, len);
+                    val[len] = '\0';
+                    current += len + 2;
+                    
+                    if (i % 2 == 1) { // Value
+                         int col_idx = i / 2;
+                         if (col_idx < res->num_cols) {
+                             free(res->rows[0][col_idx]);
+                             res->rows[0][col_idx] = val;
+                         } else {
+                             free(val);
+                         }
+                    } else {
+                         // Field name - for matching in future, for now ignore
+                         free(val);
+                    }
+                } else if (current[0] == ':') { // Integer
+                    current = strstr(current, "\r\n") + 2;
                 }
             }
         } else if (buf[0] == '-') {
@@ -97,7 +130,10 @@ cleanup:
 #endif
 }
 
+#include "../query_processor/schema_manager.h"
+
 int main() {
+    schema_init();
     char line[1024];
     printf("RedisSQL CLI\n");
     printf("Type 'exit' to quit.\n");
@@ -106,13 +142,23 @@ int main() {
         printf("sql> ");
         if (!fgets(line, sizeof(line), stdin)) break;
         
-        // Remove newline
         line[strcspn(line, "\r\n")] = 0;
-        
         if (strcasecmp(line, "exit") == 0) break;
         if (strlen(line) == 0) continue;
 
         SQLResult res = process_sql(line);
+        
+        // Handle CLEAR_SCREEN
+        if (res.num_rows > 0 && res.rows[0][0] && strcmp(res.rows[0][0], "CLEAR_SCREEN") == 0) {
+#ifdef _WIN32
+            system("cls");
+#else
+            system("clear");
+#endif
+            free_sql_result(res);
+            continue;
+        }
+
         if (!res.error && res.redis_cmd) {
             execute_redis_cmd(&res);
         }

@@ -96,15 +96,18 @@ SQLQuery parse_query(Parser *p) {
         }
 
         if (match(p, TOKEN_LPAREN)) {
-            if (p->current.type == TOKEN_STRING || p->current.type == TOKEN_IDENTIFIER) {
-                q.key = sdsnew(p->current.text);
+            q.vals = NULL;
+            q.num_vals = 0;
+            while (p->current.type == TOKEN_STRING || p->current.type == TOKEN_IDENTIFIER) {
+                q.vals = realloc(q.vals, sizeof(sds) * (q.num_vals + 1));
+                q.vals[q.num_vals] = sdsnew(p->current.text);
+                
+                if (q.num_vals == 0) q.key = sdsnew(p->current.text);
+                else if (q.num_vals == 1) q.val = sdsnew(p->current.text);
+                
+                q.num_vals++;
                 advance(p);
-            }
-            if (match(p, TOKEN_COMMA)) {
-                if (p->current.type == TOKEN_STRING || p->current.type == TOKEN_IDENTIFIER) {
-                    q.val = sdsnew(p->current.text);
-                    advance(p);
-                }
+                if (!match(p, TOKEN_COMMA)) break;
             }
             match(p, TOKEN_RPAREN);
         }
@@ -180,8 +183,14 @@ SQLQuery parse_query(Parser *p) {
                     Column *c = &q.cols[q.num_cols];
                     c->name = strdup(p->current.text);
                     c->not_null = 0;
+                    c->is_primary = 0;
                     advance(p);
                     
+                    if (match(p, TOKEN_KEYWORD_PRIMARY)) {
+                        match(p, TOKEN_KEYWORD_KEY);
+                        c->is_primary = 1;
+                    }
+
                     if (match(p, TOKEN_KEYWORD_INT)) {
                         c->type = TYPE_INT;
                     } else if (match(p, TOKEN_KEYWORD_VARCHAR)) {
@@ -192,6 +201,11 @@ SQLQuery parse_query(Parser *p) {
                         }
                     }
                     
+                    if (match(p, TOKEN_KEYWORD_PRIMARY)) { // case where type is before primary key
+                        match(p, TOKEN_KEYWORD_KEY);
+                        c->is_primary = 1;
+                    }
+
                     if (match(p, TOKEN_KEYWORD_NOT_NULL)) {
                         c->not_null = 1;
                     }
@@ -204,6 +218,25 @@ SQLQuery parse_query(Parser *p) {
         } else {
             set_error(p, "Expected DATABASE or TABLE after CREATE");
         }
+    } else if (match(p, TOKEN_KEYWORD_USE)) {
+        q.type = 6; // USE
+        if (p->current.type == TOKEN_IDENTIFIER) {
+            q.key = sdsnew(p->current.text);
+            advance(p);
+        } else {
+            set_error(p, "Expected database name after USE");
+        }
+    } else if (match(p, TOKEN_KEYWORD_LIST)) {
+        q.type = 7; // LIST
+        if (match(p, TOKEN_KEYWORD_DATABASES)) {
+            q.key = sdsnew("DATABASES");
+        } else if (match(p, TOKEN_KEYWORD_TABLES)) {
+            q.key = sdsnew("TABLES");
+        } else {
+            set_error(p, "Expected DATABASES or TABLES after LIST");
+        }
+    } else if (match(p, TOKEN_KEYWORD_CLEAR) || match(p, TOKEN_KEYWORD_CLS)) {
+        q.type = 8; // CLEAR
     } else {
         set_error(p, "Unknown or unsupported SQL command");
     }
