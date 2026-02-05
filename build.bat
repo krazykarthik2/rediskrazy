@@ -32,7 +32,7 @@ echo [SUCCESS] Server compiled to %OUTPUT_DIR%\server.exe
 
 rem Compile CLI (UI + Query Processor)
 echo Compiling SQL CLI...
-gcc -O2 -Wall -Wextra "%QP_DIR%\sql_parser.c" "%UI_DIR%\table_formatter.c" "%UI_DIR%\cli.c" "%BACKEND_DIR%\sds.c" -o "%OUTPUT_DIR%\sql_cli.exe" -lws2_32
+gcc -O2 -Wall -Wextra "%QP_DIR%\sql_parser.c" "%QP_DIR%\sql_lexer.c" "%QP_DIR%\sql_parser_internal.c" "%QP_DIR%\sql_translator.c" "%QP_DIR%\schema_manager.c" "%UI_DIR%\table_formatter.c" "%UI_DIR%\cli.c" "%BACKEND_DIR%\sds.c" -o "%OUTPUT_DIR%\sql_cli.exe" -lws2_32
 if errorlevel 1 (
     echo [ERROR] Failed to compile SQL CLI.
     exit /b 1

@@ -14,7 +14,7 @@ echo.
 echo ========================================
 echo STEP 2: Running Automated Tests...
 echo ========================================
-timeout /t 2 /nobreak >nul
+ping 127.0.0.1 -n 3 > nul
 python test.py
 if errorlevel 1 (
     echo [ERROR] Tests failed.
@@ -26,15 +26,13 @@ echo ========================================
 echo STEP 3: Starting Redis Server for CLI...
 echo ========================================
 start /B execs\server.exe
-timeout /t 2 /nobreak >nul
+ping 127.0.0.1 -n 3 > nul
 
 echo.
 echo ========================================
 echo STEP 4: Starting SQL CLI Layer...
 echo ========================================
-echo You can run queries like:
-echo   SELECT * FROM strings WHERE key = 'user:1'
-echo   INSERT INTO strings VALUES ('user:1', 'Alice')
+echo You can run queries
 echo.
 execs\sql_cli.exe
 

@@ -3,11 +3,15 @@
 
 #include "../backend/sds.h"
 
+#include "schema_manager.h"
+
 typedef struct {
-    int type; // 0: SELECT, 1: INSERT/SET, 2: DELETE, 3: UPDATE
+    int type; // 0: SELECT, 1: INSERT, 2: DELETE, 3: UPDATE, 4: CREATE_DB, 5: CREATE_TABLE
     sds key;
     sds val;
     sds table;
+    int num_cols;
+    Column *cols;
 } SQLQuery;
 
 typedef struct {
