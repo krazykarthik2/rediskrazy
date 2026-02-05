@@ -3,6 +3,9 @@ setlocal
 
 rem Define directories
 set "SOURCE_DIR=%~dp0src_c"
+set "BACKEND_DIR=%SOURCE_DIR%\backend"
+set "QP_DIR=%SOURCE_DIR%\query_processor"
+set "UI_DIR=%SOURCE_DIR%\UI"
 set "OUTPUT_DIR=%~dp0execs"
 
 rem Create output directory if it doesn't exist
@@ -12,17 +15,29 @@ if not exist "%OUTPUT_DIR%" (
 )
 
 echo ========================================
-echo Building Redis Clone...
+echo Building Redis Clone with SQL Layer...
 echo ========================================
 
-rem Compile Server
+rem Compile Server (Backend)
 echo Compiling server...
-gcc -O2 -Wall -Wextra "%SOURCE_DIR%\dict.c" "%SOURCE_DIR%\rdb.c" "%SOURCE_DIR%\ae.c" "%SOURCE_DIR%\resp.c" "%SOURCE_DIR%\avl.c" "%SOURCE_DIR%\zset.c" "%SOURCE_DIR%\server.c" -o "%OUTPUT_DIR%\server.exe" -lws2_32
+pushd "%BACKEND_DIR%"
+gcc -O2 -Wall -Wextra dict.c rdb.c ae.c resp.c avl.c zset.c tpool.c sds.c mempool.c expheap.c aofbuf.c server.c -o "%OUTPUT_DIR%\server.exe" -lws2_32
 if errorlevel 1 (
+    popd
     echo [ERROR] Failed to compile server.
     exit /b 1
 )
+popd
 echo [SUCCESS] Server compiled to %OUTPUT_DIR%\server.exe
+
+rem Compile CLI (UI + Query Processor)
+echo Compiling SQL CLI...
+gcc -O2 -Wall -Wextra "%QP_DIR%\sql_parser.c" "%UI_DIR%\table_formatter.c" "%UI_DIR%\cli.c" "%BACKEND_DIR%\sds.c" -o "%OUTPUT_DIR%\sql_cli.exe" -lws2_32
+if errorlevel 1 (
+    echo [ERROR] Failed to compile SQL CLI.
+    exit /b 1
+)
+echo [SUCCESS] SQL CLI compiled to %OUTPUT_DIR%\sql_cli.exe
 
 echo ========================================
 echo Build Complete.

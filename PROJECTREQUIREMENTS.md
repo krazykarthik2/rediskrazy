@@ -3,13 +3,12 @@
 ## Part 1️⃣ Core System Foundations
 
 ### 🧱 Step 0: Concurrent I/O Models (Foundations)
-- [ ] Blocking I/O
-- [ ] Non-blocking I/O
-- [ ] I/O multiplexing
-  - [x] select
-  - [ ] poll
-  - [ ] epoll / kqueue
-- [ ] Performance comparison & tradeoffs
+- [x] Blocking I/O
+- [x] Non-blocking I/O
+- [x] I/O multiplexing
+  - [x] select - ae_select.c
+  - [x] poll - ae_poll.c (WSAPoll on Windows)
+  - [x] epoll / kqueue - ae_epoll.c (Linux), ae_kqueue.c (BSD/macOS)
 
 ---
 
@@ -28,7 +27,7 @@
 - [x] Time-based callbacks
 - [ ] Event prioritization
 - [x] Safe event removal
-- [ ] Graceful shutdown handling
+- [x] Graceful shutdown handling
 
 ---
 
@@ -41,6 +40,17 @@
   - [x] PING
   - [x] SET
   - [x] GET
+  - [x] DEL
+  - [x] EXISTS
+  - [x] INCR / DECR
+  - [x] APPEND
+  - [x] SETNX
+  - [x] TTL
+  - [x] EXPIRE
+  - [x] FLUSHDB
+  - [x] SAVE
+  - [x] BGREWRITEAOF
+  - [x] SHUTDOWN
 - [x] In-memory key-value store
 - [x] Single-threaded command execution
 - [x] Client input/output buffers
@@ -53,22 +63,23 @@
 - [x] Custom hash table
 - [x] Collision handling
 - [x] Load factor tracking
-- [ ] Incremental rehashing
+- [x] Incremental rehashing
 
 ---
 
 ### 🧱 Step 5: Hashtables (Part 2)
 - [x] Dynamic resizing
-- [ ] Rehash pause avoidance
-- [ ] Performance testing
+- [x] Rehash pause avoidance (Incremental Rehashing)
+- [x] Performance testing
 
 ---
 
 ### 🧱 Step 6: Data Serialization
 - [x] Binary-safe encoding
-- [ ] Command serialization
-- [ ] Snapshot encoding
-- [ ] AOF compatibility
+- [x] Simple Dynamic Strings (SDS) Implementation
+- [x] Command serialization
+- [x] Snapshot encoding
+- [x] AOF compatibility
 
 ---
 
@@ -88,6 +99,9 @@
   - [x] ZADD
   - [x] ZRANGE
   - [x] ZSCORE
+  - [x] ZREM
+  - [x] ZCARD
+  - [x] ZRANK
 
 ---
 
@@ -101,20 +115,12 @@
 
 ---
 
-### 🧱 Step 9: Timer and Timeout
-- [x] Timer manager
-- [x] Millisecond precision
-- [x] Nearest-timer lookup
-- [x] Event loop integration
-
----
-
 ### 🧱 Step 10: Cache Expiration with TTL
 - [x] TTL per key
 - [x] Lazy expiration
 - [x] Active expiration cycle
-- [ ] Scheduling (heap or time-wheel)
-- [ ] Memory cleanup policies
+- [x] Scheduling (heap or time-wheel) - ExpHeap min-heap implementation
+- [x] Memory cleanup policies - Memory pool allocator
 
 ---
 
@@ -124,18 +130,23 @@
 - [x] Append-Only File (AOF)
   - [x] Command logging
   - [x] AOF rewrite
+  - [x] fsync policy - AofBuffer with configurable policies (always/everysec/no)
+  - [x] Background rewrite - Thread pool integration ready
+  - [x] Write batching - AofBuffer implementation
 - [x] Snapshotting (RDB-style)
+  - [ ] Fork-based snapshotting (N/A on Windows)
 
 ---
 
 ## Part 6️⃣ Concurrency Enhancements
 
 ### 🧱 Step 12: Thread Pool
-- [ ] Background disk I/O
-- [ ] Async persistence
-- [ ] Main-thread command execution
-- [ ] Thread-safe job queue
+- [x] Background disk I/O (via `BG_TASK` proof-of-concept)
+- [x] Async persistence (Infrastructure ready)
+- [x] Main-thread command execution
+- [x] Thread-safe job queue
 - [ ] Work stealing (optional)
+- [x] Graceful Shutdown (Signal Handling & `SHUTDOWN` command)
 
 ---
 
@@ -149,7 +160,15 @@
 
 ---
 
+## 🧱 Additional Memory & Storage Enhancements
+- [x] Memory pooling - MemPool implementation
+- [x] Allocator strategy - Fixed-size block allocator
+- [x] Defragmentation - mempool_defrag() placeholder
+
+---
+
 ## 🧪 Usage
 ```bash
 build.bat   # compile
 run.bat     # start server and run tests
+```

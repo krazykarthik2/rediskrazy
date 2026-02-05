@@ -45,18 +45,16 @@ static AVLNode *rotate_left(AVLNode *x) {
     return y;
 }
 
-// Compare two nodes: return <0 if A < B, >0 if A > B, 0 if equal (only if exact same key and score)
-// Sort order: Score ASC, then Key Lexicographically ASC
-static int compare_nodes(const char *keyA, double scoreA, const char *keyB, double scoreB) {
+static int compare_nodes(sds keyA, double scoreA, sds keyB, double scoreB) {
     if (scoreA < scoreB) return -1;
     if (scoreA > scoreB) return 1;
-    return strcmp(keyA, keyB);
+    return sdscmp(keyA, keyB);
 }
 
-static AVLNode *avl_insert_node(AVLNode *node, const char *key, double score, int *inserted) {
+static AVLNode *avl_insert_node(AVLNode *node, sds key, double score, int *inserted) {
     if (!node) {
         AVLNode *n = (AVLNode*)malloc(sizeof(AVLNode));
-        n->key = _strdup(key);
+        n->key = sdsdup(key);
         n->score = score;
         n->height = 1;
         n->left = NULL;
@@ -71,9 +69,6 @@ static AVLNode *avl_insert_node(AVLNode *node, const char *key, double score, in
     } else if (cmp > 0) {
         node->right = avl_insert_node(node->right, key, score, inserted);
     } else {
-        // Duplicate (same key AND score). 
-        // In full ZSet, user might call ZADD with same score/member. 
-        // Logic usually handles this before calling avl_insert, or we just do nothing.
         *inserted = 0;
         return node;
     }
@@ -81,21 +76,17 @@ static AVLNode *avl_insert_node(AVLNode *node, const char *key, double score, in
     update_height(node);
     int balance = get_balance(node);
 
-    // Left Left
     if (balance > 1 && compare_nodes(key, score, node->left->key, node->left->score) < 0)
         return rotate_right(node);
 
-    // Right Right
     if (balance < -1 && compare_nodes(key, score, node->right->key, node->right->score) > 0)
         return rotate_left(node);
 
-    // Left Right
     if (balance > 1 && compare_nodes(key, score, node->left->key, node->left->score) > 0) {
         node->left = rotate_left(node->left);
         return rotate_right(node);
     }
 
-    // Right Left
     if (balance < -1 && compare_nodes(key, score, node->right->key, node->right->score) < 0) {
         node->right = rotate_right(node->right);
         return rotate_left(node);
@@ -110,7 +101,7 @@ static AVLNode *min_value_node(AVLNode *node) {
     return current;
 }
 
-static AVLNode *avl_delete_node(AVLNode *root, const char *key, double score, int *deleted) {
+static AVLNode *avl_delete_node(AVLNode *root, sds key, double score, int *deleted) {
     if (!root) return NULL;
 
     int cmp = compare_nodes(key, score, root->key, root->score);
@@ -119,7 +110,6 @@ static AVLNode *avl_delete_node(AVLNode *root, const char *key, double score, in
     } else if (cmp > 0) {
         root->right = avl_delete_node(root->right, key, score, deleted);
     } else {
-        // Found
         *deleted = 1;
         if (!root->left || !root->right) {
             AVLNode *temp = root->left ? root->left : root->right;
@@ -127,33 +117,20 @@ static AVLNode *avl_delete_node(AVLNode *root, const char *key, double score, in
                 temp = root;
                 root = NULL;
             } else {
-                *root = *temp; // Copy contents
-                // wait, careful with pointers if we do this struct copy. 
-                // Better to just pointer swap.
-                // Standard BST delete logic:
+                *root = *temp; 
             }
-            // If strictly pointer manipulation:
-            if (temp == root) { // No children case
-                free(temp->key);
+            if (temp == root) { 
+                sdsfree(temp->key);
                 free(temp);
-                root = NULL; // already set above, but clarifying
+                root = NULL; 
             } else {
-                // One child case, we copied content to root.
-                // We must free the temp node which is now structurally detached?
-                // Actually the *root = *temp copy is tricky with allocated members like key.
-                // It copies the pointer. So now root->key points to what temp->key pointed.
-                // We should NOT free temp->key because root owns it now.
-                // We DO free temp structure.
                 free(temp); 
             }
         } else {
-            // Two children
             AVLNode *temp = min_value_node(root->right);
-            // Copy successor data to this node
-            free(root->key); // Free old key
-            root->key = _strdup(temp->key);
+            sdsfree(root->key); 
+            root->key = sdsdup(temp->key);
             root->score = temp->score;
-            // Delete successor
             root->right = avl_delete_node(root->right, temp->key, temp->score, deleted);
         }
     }
@@ -163,7 +140,6 @@ static AVLNode *avl_delete_node(AVLNode *root, const char *key, double score, in
     update_height(root);
     int balance = get_balance(root);
 
-    // Balance checks
     if (balance > 1 && get_balance(root->left) >= 0)
         return rotate_right(root);
 
@@ -194,7 +170,7 @@ static void free_nodes(AVLNode *node) {
     if (!node) return;
     free_nodes(node->left);
     free_nodes(node->right);
-    free(node->key);
+    sdsfree(node->key);
     free(node);
 }
 
@@ -204,14 +180,14 @@ void avl_free(AVLTree *tree) {
     free(tree);
 }
 
-int avl_insert(AVLTree *tree, const char *key, double score) {
+int avl_insert(AVLTree *tree, sds key, double score) {
     int inserted = 0;
     tree->root = avl_insert_node(tree->root, key, score, &inserted);
     if (inserted) tree->count++;
     return inserted;
 }
 
-int avl_delete(AVLTree *tree, const char *key, double score) {
+int avl_delete(AVLTree *tree, sds key, double score) {
     int deleted = 0;
     tree->root = avl_delete_node(tree->root, key, score, &deleted);
     if (deleted) tree->count--;
@@ -229,11 +205,9 @@ void avl_traverse(AVLTree *tree, avl_callback cb, void *arg) {
     traverse_in_order(tree->root, cb, arg);
 }
 
-// Helper for get by rank
 static AVLNode *get_rank_rec(AVLNode *node, size_t rank, size_t *curr) {
     if (!node) return NULL;
     
-    // In-order: Left, Self, Right
     AVLNode *res = get_rank_rec(node->left, rank, curr);
     if (res) return res;
 

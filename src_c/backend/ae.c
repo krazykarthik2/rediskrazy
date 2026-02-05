@@ -1,3 +1,17 @@
+/*
+ * ae.c - A simple event-driven programming library
+ * 
+ * Supports multiple I/O multiplexing backends:
+ * - select: Available everywhere (default fallback)
+ * - poll: Available on POSIX and Windows (via WSAPoll)
+ * - epoll: Linux only, O(1) scalability
+ * - kqueue: BSD/macOS only, O(1) scalability
+ * 
+ * Backend selection:
+ * - Compile-time: Define AE_USE_SELECT, AE_USE_POLL, AE_USE_EPOLL, or AE_USE_KQUEUE
+ * - If none defined, auto-selects best available for platform
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -14,12 +28,36 @@
 
 #include "ae.h"
 
-// Helper to get current time in ms
+/* Auto-select best available backend if not specified */
+#if !defined(AE_USE_SELECT) && !defined(AE_USE_POLL) && !defined(AE_USE_EPOLL) && !defined(AE_USE_KQUEUE)
+    #if defined(__linux__)
+        #define AE_USE_EPOLL
+    #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+        #define AE_USE_KQUEUE
+    #elif defined(_WIN32)
+        #define AE_USE_POLL  /* WSAPoll available on Vista+ */
+    #else
+        #define AE_USE_SELECT
+    #endif
+#endif
+
+/* Include the appropriate backend implementation */
+#ifdef AE_USE_EPOLL
+    #include "ae_epoll.c"
+#elif defined(AE_USE_KQUEUE)
+    #include "ae_kqueue.c"
+#elif defined(AE_USE_POLL)
+    #include "ae_poll.c"
+#else
+    #include "ae_select.c"
+#endif
+
+/* Helper to get current time in ms */
 static void aeGetTime(long *seconds, long *milliseconds) {
 #ifdef _WIN32
     SYSTEMTIME st;
     GetSystemTime(&st);
-    *seconds = time(NULL); // Approximate sync
+    *seconds = (long)time(NULL);
     *milliseconds = st.wMilliseconds;
 #else
     struct timeval tv;
@@ -35,7 +73,7 @@ static void aeAddMillisecondsToNow(long long milliseconds, long *sec, long *ms) 
     when_sec = cur_sec + milliseconds/1000;
     when_ms = cur_ms + milliseconds%1000;
     if (when_ms >= 1000) {
-        when_sec ++;
+        when_sec++;
         when_ms -= 1000;
     }
     *sec = when_sec;
@@ -64,11 +102,20 @@ aeEventLoop *aeCreateEventLoop(int setsize) {
     
     for (int i = 0; i < setsize; i++)
         eventLoop->events[i].mask = AE_NONE;
-        
+    
+    if (aeApiCreate(eventLoop) == -1) {
+        free(eventLoop->events);
+        free(eventLoop->fired);
+        free(eventLoop);
+        return NULL;
+    }
+    
+    printf("[AE] Using I/O backend: %s\n", aeApiName());
     return eventLoop;
 }
 
 void aeDeleteEventLoop(aeEventLoop *eventLoop) {
+    aeApiFree(eventLoop);
     free(eventLoop->events);
     free(eventLoop->fired);
     free(eventLoop);
@@ -83,6 +130,9 @@ int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
 {
     if (fd >= eventLoop->setsize) return AE_ERR;
     aeFileEvent *fe = &eventLoop->events[fd];
+    
+    if (aeApiAddEvent(eventLoop, fd, mask) == -1)
+        return AE_ERR;
     
     if (mask & AE_READABLE) fe->rfileProc = proc;
     if (mask & AE_WRITABLE) fe->wfileProc = proc;
@@ -100,9 +150,10 @@ void aeDeleteFileEvent(aeEventLoop *eventLoop, int fd, int mask) {
     aeFileEvent *fe = &eventLoop->events[fd];
     if (fe->mask == AE_NONE) return;
     
+    aeApiDelEvent(eventLoop, fd, mask);
     fe->mask = fe->mask & (~mask);
+    
     if (fd == eventLoop->maxfd && fe->mask == AE_NONE) {
-        /* Update the max fd */
         int j;
         for (j = eventLoop->maxfd-1; j >= 0; j--)
             if (eventLoop->events[j].mask != AE_NONE) break;
@@ -184,9 +235,6 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
     while(te) {
         long long id;
         
-        // Skip removed events (if we support deletion while iterating? Not implemented safe here yet)
-        // Simplified approach: iterate and process one if fired, or standard impl.
-        
         if (te->id > maxId) {
             te = te->next;
             continue;
@@ -207,10 +255,7 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
                 aeDeleteTimeEvent(eventLoop, id);
             }
             
-            // Restart iteration as list might change because of callbacks
-            // Optimized Redis approach is slightly different but this is safe MVP
             te = eventLoop->timeEventHead;
-            // Update time used for checks
             aeGetTime(&now_sec, &now_ms);
         } else {
             te = te->next;
@@ -222,12 +267,7 @@ static int processTimeEvents(aeEventLoop *eventLoop) {
 int aeProcessEvents(aeEventLoop *eventLoop, int flags) {
     int processed = 0, numevents;
     
-    /* Nothing to do? return */
     if (!(flags & AE_TIME_EVENTS) && !(flags & AE_FILE_EVENTS)) return 0;
-    
-    /* Note that we want to scan for time events even if AE_TIME_EVENTS
-     * is not set if AE_DONT_WAIT is set, because we want to run
-     * existing timers if they are ready to fire. */
 
     struct timeval tv, *tvp;
     
@@ -242,20 +282,19 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags) {
                 (shortest->when_ms - now_ms);
             
             if (ms > 0) {
-                tv.tv_sec = ms/1000;
-                tv.tv_usec = (ms%1000)*1000;
+                tv.tv_sec = (long)(ms/1000);
+                tv.tv_usec = (long)((ms%1000)*1000);
             } else {
                 tv.tv_sec = 0;
                 tv.tv_usec = 0;
             }
         } else {
-            /* If no timers, we can wait forever unless AE_DONT_WAIT */
             if (flags & AE_DONT_WAIT) {
                 tv.tv_sec = 0;
                 tv.tv_usec = 0;
                 tvp = &tv;
             } else {
-                tvp = NULL; /* wait forever */
+                tvp = NULL;
             }
         }
     } else {
@@ -264,50 +303,26 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags) {
         tvp = &tv;
     }
     
-    // Select
-    fd_set rfds, wfds;
-    FD_ZERO(&rfds);
-    FD_ZERO(&wfds);
+    /* Call the backend-specific poll function */
+    numevents = aeApiPoll(eventLoop, tvp);
     
-    // Populate sets
-    int j;
-    if (eventLoop->maxfd != -1) {
-        for (j = 0; j <= eventLoop->maxfd; j++) {
-            if (eventLoop->events[j].mask == AE_NONE) continue;
-            if (eventLoop->events[j].mask & AE_READABLE) FD_SET(j, &rfds);
-            if (eventLoop->events[j].mask & AE_WRITABLE) FD_SET(j, &wfds);
+    for (int j = 0; j < numevents; j++) {
+        aeFileEvent *fe = &eventLoop->events[eventLoop->fired[j].fd];
+        int mask = eventLoop->fired[j].mask;
+        int fd = eventLoop->fired[j].fd;
+        int rfired = 0;
+        
+        if (fe->mask & mask & AE_READABLE) {
+            rfired = 1;
+            fe->rfileProc(eventLoop, fd, fe->clientData, mask);
         }
+        if (fe->mask & mask & AE_WRITABLE) {
+            if (!rfired || fe->wfileProc != fe->rfileProc)
+                fe->wfileProc(eventLoop, fd, fe->clientData, mask);
+        }
+        processed++;
     }
     
-    numevents = select(eventLoop->maxfd+1, &rfds, &wfds, NULL, tvp);
-    
-    if (numevents > 0) {
-        for (j = 0; j <= eventLoop->maxfd; j++) {
-            int mask = 0;
-            aeFileEvent *fe = &eventLoop->events[j];
-            if (fe->mask == AE_NONE) continue;
-            
-            if (fe->mask & AE_READABLE && FD_ISSET(j, &rfds))
-                mask |= AE_READABLE;
-            if (fe->mask & AE_WRITABLE && FD_ISSET(j, &wfds))
-                mask |= AE_WRITABLE;
-            
-            if (mask != 0) { // Fire
-                int rfired = 0;
-                if (fe->mask & mask & AE_READABLE) {
-                    rfired = 1;
-                    fe->rfileProc(eventLoop, j, fe->clientData, mask);
-                }
-                if (fe->mask & mask & AE_WRITABLE) {
-                    if (!rfired || fe->wfileProc != fe->rfileProc)
-                        fe->wfileProc(eventLoop, j, fe->clientData, mask);
-                }
-                processed++;
-            }
-        }
-    }
-    
-    /* Process time events */
     if (flags & AE_TIME_EVENTS)
         processed += processTimeEvents(eventLoop);
         
@@ -319,4 +334,9 @@ void aeMain(aeEventLoop *eventLoop) {
     while (!eventLoop->stop) {
         aeProcessEvents(eventLoop, AE_ALL_EVENTS);
     }
+}
+
+/* Return the name of the I/O backend in use */
+const char *aeGetApiName(void) {
+    return aeApiName();
 }

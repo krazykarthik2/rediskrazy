@@ -1,0 +1,2 @@
+gcc: warning: : linker input file unused because linking not done
+gcc: error: : linker input file not found: No such file or directory

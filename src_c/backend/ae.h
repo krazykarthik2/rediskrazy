@@ -78,4 +78,7 @@ int aeDeleteTimeEvent(aeEventLoop *eventLoop, long long id);
 int aeProcessEvents(aeEventLoop *eventLoop, int flags);
 void aeMain(aeEventLoop *eventLoop);
 
+/* Return the name of the I/O backend in use */
+const char *aeGetApiName(void);
+
 #endif

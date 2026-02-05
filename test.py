@@ -23,16 +23,21 @@ class TestRunner:
              print(f"[Runner] Error: server executable not found at {SERVER_EXE}")
              sys.exit(1)
              
-        self.server_proc = subprocess.Popen([exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.server_proc = subprocess.Popen([exe], stdout=None, stderr=None)
         time.sleep(1) # Wait for startup
 
     def stop_server(self):
         if self.server_proc:
             print("[Runner] Stopping Server...")
-            self.server_proc.terminate()
-            self.server_proc.wait()
+            try:
+                self.server_proc.kill()
+                self.server_proc.wait(timeout=2)
+            except:
+                # Force kill if still alive
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.server_proc.pid)], 
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.server_proc = None
-            time.sleep(0.5)
+            time.sleep(1) # Extra time to release socket
 
     def connect(self):
         try:
@@ -173,6 +178,38 @@ class TestRunner:
         else:
             print(f"[FAIL] ZRANGE content. Got: {res}")
 
+        # ZCARD
+        self.send_cmd("ZCARD", "myz")
+        self.assert_resp(self.read_resp(), ":2", "ZCARD")
+        
+        # ZRANK
+        self.send_cmd("ZRANK", "myz", "m1")
+        self.assert_resp(self.read_resp(), ":0", "ZRANK m1")
+        self.send_cmd("ZRANK", "myz", "m2")
+        self.assert_resp(self.read_resp(), ":1", "ZRANK m2")
+        
+        # ZREM
+        self.send_cmd("ZREM", "myz", "m1")
+        self.assert_resp(self.read_resp(), ":1", "ZREM")
+        self.send_cmd("ZCARD", "myz")
+        self.assert_resp(self.read_resp(), ":1", "ZCARD after ZREM")
+
+        # APPEND
+        self.send_cmd("SET", "app_key", "Hello")
+        self.read_resp()
+        self.send_cmd("APPEND", "app_key", " World")
+        self.assert_resp(self.read_resp(), ":11", "APPEND length")
+        self.send_cmd("GET", "app_key")
+        self.assert_resp(self.read_resp(), "Hello World", "APPEND value")
+
+        # SETNX
+        self.send_cmd("SETNX", "nx_key", "first")
+        self.assert_resp(self.read_resp(), ":1", "SETNX new key")
+        self.send_cmd("SETNX", "nx_key", "second")
+        self.assert_resp(self.read_resp(), ":0", "SETNX existing key")
+        self.send_cmd("GET", "nx_key")
+        self.assert_resp(self.read_resp(), "first", "SETNX value unchanged")
+
         # 7. Conflicts
         self.send_cmd("ZADD", "key_str", "1", "m")
         self.assert_resp(self.read_resp(), "WRONGTYPE", "ZADD on String")
@@ -219,10 +256,104 @@ class TestRunner:
         self.send_cmd("GET", "rewrite_k")
         self.assert_resp(self.read_resp(), "2", "Modified key persisted after rewrite")
         
+        # 11. Shutdown Test
+        print("    [Info] Testing SHUTDOWN...")
+        self.send_cmd("SHUTDOWN")
+        self.assert_resp(self.read_resp(), "OK", "SHUTDOWN response")
         self.disconnect()
+        # Wait for assertion of exit code
+        try:
+             self.server_proc.wait(timeout=2)
+             if self.server_proc.returncode == 0:
+                 print("    [PASS] Server exited cleanly with code 0")
+             else:
+                 print(f"    [FAIL] Server exited with code {self.server_proc.returncode}")
+        except subprocess.TimeoutExpired:
+             print("    [FAIL] Server did not exit in time")
+             self.server_proc.kill()
 
+    def test_new_features(self):
+        print("\n=== New Feature Tests ===")
+        self.start_server()
+        self.connect()
+        
+        # Test CONFIG SET appendfsync
+        print("    [Info] Testing CONFIG SET appendfsync...")
+        self.send_cmd("CONFIG", "SET", "appendfsync", "always")
+        self.assert_resp(self.read_resp(), "OK", "CONFIG SET appendfsync always")
+        
+        self.send_cmd("CONFIG", "SET", "appendfsync", "everysec")
+        self.assert_resp(self.read_resp(), "OK", "CONFIG SET appendfsync everysec")
+        
+        self.send_cmd("CONFIG", "SET", "appendfsync", "no")
+        self.assert_resp(self.read_resp(), "OK", "CONFIG SET appendfsync no")
+        
+        # Test DEBUG MEMPOOL
+        print("    [Info] Testing DEBUG MEMPOOL...")
+        self.send_cmd("DEBUG", "MEMPOOL")
+        res = self.read_resp()
+        if "in_use" in res and "allocated" in res:
+            print("[PASS] DEBUG MEMPOOL")
+        else:
+            print(f"[FAIL] DEBUG MEMPOOL. Got: {res}")
+        
+        # Test DEBUG EXPHEAP
+        print("    [Info] Testing DEBUG EXPHEAP...")
+        self.send_cmd("DEBUG", "EXPHEAP")
+        res = self.read_resp()
+        if "size" in res:
+            print("[PASS] DEBUG EXPHEAP")
+        else:
+            print(f"[FAIL] DEBUG EXPHEAP. Got: {res}")
+            
+        # Test expheap scheduling by adding key with TTL
+        print("    [Info] Testing ExpHeap TTL scheduling...")
+        self.send_cmd("SET", "ttl_test", "value", "EX", "1")
+        self.read_resp()
+        self.send_cmd("DEBUG", "EXPHEAP")
+        res = self.read_resp()
+        # Heap should have at least 1 entry now
+        print(f"    [Info] ExpHeap after SET with TTL: {res}")
+        
+        self.disconnect()
+        self.stop_server()
+
+    def test_thread_pool(self):
+        print("\n=== Thread Pool Tests ===")
+        self.start_server()
+        self.connect()
+        
+        # 1. Submit background task (2000ms sleep)
+        print("    [Info] Submitting BG_TASK 2000ms...")
+        self.send_cmd("BG_TASK", "2000")
+        self.assert_resp(self.read_resp(), "Background task submitted", "BG_TASK response")
+        
+        # 2. Immediately check responsiveness (should not block)
+        start_time = time.time()
+        self.send_cmd("PING")
+        self.assert_resp(self.read_resp(), "PONG", "Server responsiveness during busy background")
+        duration = time.time() - start_time
+        
+        if duration < 0.5:
+            print(f"    [PASS] Server responded in {duration:.4f}s (Non-blocking)")
+        else:
+            print(f"    [FAIL] Server blocked for {duration:.4f}s")
+            
+        # Cleanup
+        self.disconnect()
+        # We don't strictly wait for BG task to finish to kill, but tpool_shutdown handles it.
+        self.server_proc.terminate()
+        self.server_proc.wait() 
+             
     def run_persistence_tests(self):
         print("\n=== Persistence Tests ===")
+        
+        # Delete AOF to ensure RDB is loaded (AOF takes precedence)
+        if os.path.exists("appendonly.aof"):
+            os.remove("appendonly.aof")
+        
+        # Server was shut down by previous test, start fresh
+        self.start_server()
         
         # Phase 1: Write and Save
         if not self.connect(): return
@@ -263,6 +394,10 @@ class TestRunner:
             self.run_functional_tests()
             # Persistence test will stop and restart server
             self.run_persistence_tests()
+            # Thread pool test will stop and restart server
+            self.test_thread_pool()
+            # New feature tests
+            self.test_new_features()
         finally:
             self.stop_server()
 
