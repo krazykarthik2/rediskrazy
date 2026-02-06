@@ -6,10 +6,10 @@
 
 // Save the current dataset (strings and zsets) to a file.
 // Returns 0 on success, -1 on error.
-int rdb_save(const char *filename, Dict *strings, Dict *zsets);
+int rdb_save(const char *filename, Dict *strings, Dict *zsets, Dict *hashes);
 
 // Load the dataset from a file into the given dictionaries.
 // Returns 0 on success, -1 on error (or file not found).
-int rdb_load(const char *filename, Dict *strings, Dict *zsets);
+int rdb_load(const char *filename, Dict *strings, Dict *zsets, Dict *hashes);
 
 #endif

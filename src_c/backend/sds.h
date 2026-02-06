@@ -35,5 +35,6 @@ sds sdsfromlonglong(long long value);
 int sdscmp(sds s1, sds s2);
 sds *sdssplitargs(const char *line, int *argc);
 void sdsfreesplitres(sds *argv, int argc);
+void sdssetlen(sds s, size_t newlen);
 
 #endif

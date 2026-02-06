@@ -40,6 +40,8 @@ int set_active_database(const char *name);
 Database* get_active_database(void);
 int create_database(const char *name);
 int create_table(const char *db_name, const char *table_name, Column *cols, int num_cols);
+int drop_database(const char *name);
+int drop_table(const char *db_name, const char *table_name);
 Database* get_database(const char *name);
 Table* get_table(Database *db, const char *name);
 

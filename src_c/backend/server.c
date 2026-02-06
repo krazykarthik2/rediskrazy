@@ -58,6 +58,7 @@ void bg_task_func(void *arg) {
 
 static Dict g_data;   // Strings (Key: sds, Val: sds)
 static Dict g_zsets;  // ZSets (Key: sds, Val: sds containing ZSet*)
+static Dict g_hashes; // Hashes (Key: sds, Val: sds containing Dict*)
 static FILE *aof = NULL;
 static aeEventLoop *g_loop = NULL;
 
@@ -243,6 +244,10 @@ static void zrange_sender(sds member, double score, void *arg) {
 // Handle Command using SDS argv
 void handle_command(sock_t client, sds *argv, int argc) {
     if (argc <= 0) return;
+
+    printf("CMD: %s", argv[0]);
+    for(int i=1; i<argc; i++) printf(" [%s]", argv[i]);
+    printf("\n");
 
     for (int i = 0; i < sdslen(argv[0]); ++i) argv[0][i] = toupper((unsigned char)argv[0][i]);
     
@@ -490,7 +495,7 @@ void handle_command(sock_t client, sds *argv, int argc) {
              }
         }
     } else if (strcmp(argv[0], "SAVE") == 0) {
-        if (rdb_save("dump.rdb", &g_data, &g_zsets) == 0) {
+        if (rdb_save("dump.rdb", &g_data, &g_zsets, &g_hashes) == 0) {
             send_all(client, "+OK\r\n", 5);
         } else {
             send_all(client, "-ERR save failed\r\n", 18);
@@ -670,6 +675,241 @@ void handle_command(sock_t client, sds *argv, int argc) {
         } else {
             send_all(client, "-ERR unknown DEBUG subcommand\r\n", 31);
         }
+    } else if (strcmp(argv[0], "HSET") == 0) {
+        if (argc < 4 || (argc - 2) % 2 != 0) {
+            send_all(client, "-ERR wrong number of arguments for 'HSET'\r\n", 45);
+        } else {
+            sds key = argv[1];
+            Dict *h = NULL;
+            sds v = dict_get(&g_hashes, key);
+            if (v) {
+                h = *(Dict**)v;
+            } else {
+                h = malloc(sizeof(Dict));
+                dict_init(h, 4);
+                sds hptr = sdsnewlen(&h, sizeof(Dict*));
+                dict_put(&g_hashes, key, hptr, 0);
+                sdsfree(hptr);
+                printf("  DEBUG: Created new hash for key [%s]\n", key);
+            }
+            
+            int added = 0;
+            for (int i = 2; i < argc; i += 2) {
+                printf("  DEBUG: HSET [%s] Field=[%s] Val=[%s]\n", key, argv[i], argv[i+1]);
+                if (dict_get(h, argv[i])) {
+                    dict_put(h, argv[i], argv[i+1], 0);
+                } else {
+                    dict_put(h, argv[i], argv[i+1], 0);
+                    added++;
+                }
+            }
+            char resp[32];
+            int n = snprintf(resp, sizeof(resp), ":%d\r\n", added);
+            send_all(client, resp, n);
+            
+            if (aof) {
+                // Log HSET as a single command or multiple? Single is better.
+                fprintf(aof, "*%d\r\n$4\r\nHSET", argc);
+                for(int i=1; i<argc; i++) {
+                    fprintf(aof, "\r\n$%zu\r\n", sdslen(argv[i]));
+                    fwrite(argv[i], 1, sdslen(argv[i]), aof);
+                }
+                fprintf(aof, "\r\n");
+                fflush(aof);
+            }
+        }
+    } else if (strcmp(argv[0], "HGETALL") == 0) {
+        if (argc < 2) {
+            send_all(client, "-ERR wrong number of arguments for 'HGETALL'\r\n", 48);
+        } else {
+            sds v = dict_get(&g_hashes, argv[1]);
+            if (!v) {
+                send_all(client, "*0\r\n", 4);
+            } else {
+                Dict *h = *(Dict**)v;
+                size_t count = 0;
+                for (int t = 0; t <= 1; t++) {
+                    if (h->ht[t].table) {
+                        for (size_t i = 0; i < h->ht[t].size; i++) {
+                            DictEntry *e = h->ht[t].table[i];
+                            while (e) { count++; e = e->next; }
+                        }
+                    }
+                }
+                
+                char resp[32];
+                int n = snprintf(resp, sizeof(resp), "*%zu\r\n", count * 2);
+                send_all(client, resp, n);
+                
+                for (int t = 0; t <= 1; t++) {
+                    if (h->ht[t].table) {
+                        for (size_t i = 0; i < h->ht[t].size; i++) {
+                            DictEntry *e = h->ht[t].table[i];
+                            while (e) {
+                                // Field
+                                char fhead[32];
+                                int fn = snprintf(fhead, sizeof(fhead), "$%zu\r\n", sdslen(e->key));
+                                send_all(client, fhead, fn);
+                                send_all(client, e->key, (int)sdslen(e->key));
+                                send_all(client, "\r\n", 2);
+                                // Value
+                                char vhead[32];
+                                int vn = snprintf(vhead, sizeof(vhead), "$%zu\r\n", sdslen(e->val));
+                                send_all(client, vhead, vn);
+                                send_all(client, e->val, (int)sdslen(e->val));
+                                send_all(client, "\r\n", 2);
+                                e = e->next;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    } else if (strcmp(argv[0], "HSCANALL") == 0) {
+        if (argc < 2) {
+            send_all(client, "-ERR wrong number of arguments for 'HSCANALL'\r\n", 48);
+        } else {
+            sds pattern = argv[1];
+            size_t plen = sdslen(pattern);
+            int has_wildcard = (plen > 0 && pattern[plen-1] == '*');
+            sds search_prefix = sdsdup(pattern);
+            size_t search_len = plen;
+            if (has_wildcard) {
+                search_prefix[plen-1] = '\0';
+                sdssetlen(search_prefix, plen-1);
+                search_len = plen - 1;
+            }
+
+            int count = 0;
+            for (int t = 0; t <= 1; t++) {
+                if (g_hashes.ht[t].table) {
+                    for (size_t i = 0; i < g_hashes.ht[t].size; i++) {
+                        DictEntry *e = g_hashes.ht[t].table[i];
+                        while(e) {
+                            int match = has_wildcard ? (sdslen(e->key) >= search_len && strncmp(e->key, search_prefix, search_len) == 0) : (strcmp(e->key, search_prefix) == 0);
+                            if (match) {
+                                printf("  HSCANALL MATCH: %s\n", e->key);
+                                count++;
+                            } else {
+                                // printf("  HSCANALL NO MATCH: %s vs %s (len %zu)\n", e->key, search_prefix, search_len);
+                            }
+                            e = e->next;
+                        }
+                    }
+                }
+            }
+
+            char resp_head[64];
+            int hn = snprintf(resp_head, sizeof(resp_head), "*%d\r\n", count);
+            send_all(client, resp_head, hn);
+
+            for (int t = 0; t <= 1; t++) {
+                if (g_hashes.ht[t].table) {
+                    for (size_t i = 0; i < g_hashes.ht[t].size; i++) {
+                        DictEntry *e = g_hashes.ht[t].table[i];
+                        while(e) {
+                             int match = has_wildcard ? (sdslen(e->key) >= search_len && strncmp(e->key, search_prefix, search_len) == 0) : (strcmp(e->key, search_prefix) == 0);
+                             if (match) {
+                                  Dict *h = *(Dict**)e->val;
+                                  size_t fcount = 0;
+                                  for(int t2=0; t2<=1; t2++) {
+                                      if(h->ht[t2].table) {
+                                          for(size_t j=0; j<h->ht[t2].size; j++) {
+                                              DictEntry *e2 = h->ht[t2].table[j];
+                                              while(e2) { fcount++; e2=e2->next; }
+                                          }
+                                      }
+                                  }
+                                  char row_head[64];
+                                  int rn = snprintf(row_head, sizeof(row_head), "*%zu\r\n", fcount * 2);
+                                  send_all(client, row_head, rn);
+                                  for(int t2=0; t2<=1; t2++) {
+                                      if(h->ht[t2].table) {
+                                          for(size_t j=0; j<h->ht[t2].size; j++) {
+                                              DictEntry *e2 = h->ht[t2].table[j];
+                                              while(e2) {
+                                                  char f_h[64], v_h[64];
+                                                  int fn = snprintf(f_h, sizeof(f_h), "$%zu\r\n", sdslen(e2->key));
+                                                  send_all(client, f_h, fn);
+                                                  send_all(client, e2->key, (int)sdslen(e2->key));
+                                                  send_all(client, "\r\n", 2);
+                                                  int vn = snprintf(v_h, sizeof(v_h), "$%zu\r\n", sdslen(e2->val));
+                                                  send_all(client, v_h, vn);
+                                                  send_all(client, e2->val, (int)sdslen(e2->val));
+                                                  send_all(client, "\r\n", 2);
+                                                  e2 = e2->next;
+                                              }
+                                          }
+                                      }
+                                  }
+                             }
+                             e = e->next;
+                        }
+                    }
+                }
+            }
+            sdsfree(search_prefix);
+        }
+    } else if (strcmp(argv[0], "KEYS") == 0) {
+        if (argc < 2) {
+            send_all(client, "-ERR wrong number of arguments for 'KEYS'\r\n", 45);
+        } else {
+            sds pattern = argv[1];
+            size_t plen = sdslen(pattern);
+            int has_wildcard = (plen > 0 && pattern[plen-1] == '*');
+            sds search_prefix = sdsdup(pattern);
+            size_t search_len = plen;
+            if (has_wildcard) {
+                search_prefix[plen-1] = '\0';
+                sdssetlen(search_prefix, plen-1);
+                search_len = plen - 1;
+            }
+
+            // Collect all matching keys
+            sds *matches = NULL;
+            int count = 0;
+
+            Dict *dicts[3] = {&g_data, &g_zsets, &g_hashes};
+            for (int d_idx = 0; d_idx < 3; d_idx++) {
+                Dict *d = dicts[d_idx];
+                for (int t = 0; t <= 1; t++) {
+                    if (!d->ht[t].table) continue;
+                    for (size_t i = 0; i < d->ht[t].size; i++) {
+                        DictEntry *e = d->ht[t].table[i];
+                        while (e) {
+                            int match = 0;
+                            if (has_wildcard) {
+                                if (sdslen(e->key) >= search_len && strncmp(e->key, search_prefix, search_len) == 0) match = 1;
+                            } else {
+                                if (strcmp(e->key, search_prefix) == 0) match = 1;
+                            }
+
+                            if (match) {
+                                matches = realloc(matches, sizeof(sds) * (count + 1));
+                                matches[count++] = sdsdup(e->key);
+                            }
+                            e = e->next;
+                        }
+                    }
+                }
+            }
+
+            char resp_head[64];
+            int hn = snprintf(resp_head, sizeof(resp_head), "*%d\r\n", count);
+            send_all(client, resp_head, hn);
+
+            for (int i = 0; i < count; i++) {
+                size_t l = sdslen(matches[i]);
+                char item_head[64];
+                int in = snprintf(item_head, sizeof(item_head), "$%zu\r\n", l);
+                send_all(client, item_head, in);
+                send_all(client, matches[i], (int)l);
+                send_all(client, "\r\n", 2);
+                sdsfree(matches[i]);
+            }
+            free(matches);
+            sdsfree(search_prefix);
+        }
     } else {
         send_all(client, "-ERR unknown command\r\n", 24);
     }
@@ -819,6 +1059,7 @@ int main(int argc, char **argv) {
     
     dict_init(&g_data, 16); 
     dict_init(&g_zsets, 16);
+    dict_init(&g_hashes, 16);
     
     // Initialize new features
     expheap_init(&g_exp_heap, 256);  // TTL scheduling heap
@@ -839,7 +1080,7 @@ int main(int argc, char **argv) {
     
     if (!loaded) {
         printf("Loading RDB...\n");
-        if (rdb_load("dump.rdb", &g_data, &g_zsets) == 0) {
+        if (rdb_load("dump.rdb", &g_data, &g_zsets, &g_hashes) == 0) {
             printf("RDB loaded successfully.\n");
         } else {
             printf("No RDB file found or load failed.\n");
@@ -877,7 +1118,7 @@ int main(int argc, char **argv) {
     aeMain(g_loop);
 
     printf("Server shutting down...\n");
-    if (rdb_save("dump.rdb", &g_data, &g_zsets) == 0) {
+    if (rdb_save("dump.rdb", &g_data, &g_zsets, &g_hashes) == 0) {
         printf("RDB saved successfully.\n");
     } else {
         printf("Failed to save RDB.\n");
@@ -888,6 +1129,7 @@ int main(int argc, char **argv) {
     WSACleanup();
     dict_destroy(&g_data);
     dict_destroy(&g_zsets); 
+    dict_destroy(&g_hashes);
     aeDeleteEventLoop(g_loop);
     tpool_shutdown();
     return 0;

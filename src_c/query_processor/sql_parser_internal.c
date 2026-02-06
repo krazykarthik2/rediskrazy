@@ -54,7 +54,8 @@ SQLQuery parse_query(Parser *p) {
             return q;
         }
         if (match(p, TOKEN_KEYWORD_WHERE)) {
-            if (p->current.type == TOKEN_IDENTIFIER && strcasecmp(p->current.text, "key") == 0) {
+            if ((p->current.type == TOKEN_IDENTIFIER || p->current.type == TOKEN_KEYWORD_KEY) && 
+                strcasecmp(p->current.text, "key") == 0) {
                 advance(p);
                 if (match(p, TOKEN_EQUALS)) {
                     if (p->current.type == TOKEN_STRING || p->current.type == TOKEN_IDENTIFIER) {
@@ -118,7 +119,8 @@ SQLQuery parse_query(Parser *p) {
             advance(p);
         }
         if (match(p, TOKEN_KEYWORD_SET)) {
-            if (p->current.type == TOKEN_IDENTIFIER && strcasecmp(p->current.text, "val") == 0) {
+            if ((p->current.type == TOKEN_IDENTIFIER || p->current.type == TOKEN_KEYWORD_VAL) && 
+                strcasecmp(p->current.text, "val") == 0) {
                 advance(p);
                 if (match(p, TOKEN_EQUALS)) {
                     if (p->current.type == TOKEN_STRING || p->current.type == TOKEN_IDENTIFIER) {
@@ -129,7 +131,8 @@ SQLQuery parse_query(Parser *p) {
             }
         }
         if (match(p, TOKEN_KEYWORD_WHERE)) {
-             if (p->current.type == TOKEN_IDENTIFIER && strcasecmp(p->current.text, "key") == 0) {
+             if ((p->current.type == TOKEN_IDENTIFIER || p->current.type == TOKEN_KEYWORD_KEY) && 
+                strcasecmp(p->current.text, "key") == 0) {
                 advance(p);
                 if (match(p, TOKEN_EQUALS)) {
                     if (p->current.type == TOKEN_STRING || p->current.type == TOKEN_IDENTIFIER) {
@@ -148,7 +151,8 @@ SQLQuery parse_query(Parser *p) {
             }
         }
         if (match(p, TOKEN_KEYWORD_WHERE)) {
-             if (p->current.type == TOKEN_IDENTIFIER && strcasecmp(p->current.text, "key") == 0) {
+             if ((p->current.type == TOKEN_IDENTIFIER || p->current.type == TOKEN_KEYWORD_KEY) && 
+                strcasecmp(p->current.text, "key") == 0) {
                 advance(p);
                 if (match(p, TOKEN_EQUALS)) {
                     if (p->current.type == TOKEN_STRING || p->current.type == TOKEN_IDENTIFIER) {
@@ -178,36 +182,66 @@ SQLQuery parse_query(Parser *p) {
             if (match(p, TOKEN_LPAREN)) {
                 q.cols = NULL;
                 q.num_cols = 0;
-                while (p->current.type == TOKEN_IDENTIFIER) {
+                while (p->current.type == TOKEN_IDENTIFIER || 
+                       p->current.type == TOKEN_KEYWORD_INT || 
+                       p->current.type == TOKEN_KEYWORD_VARCHAR ||
+                       p->current.type == TOKEN_KEYWORD_STRING) {
+                    
                     q.cols = realloc(q.cols, sizeof(Column) * (q.num_cols + 1));
                     Column *c = &q.cols[q.num_cols];
-                    c->name = strdup(p->current.text);
-                    c->not_null = 0;
-                    c->is_primary = 0;
+                    memset(c, 0, sizeof(Column));
+                    c->type = TYPE_STRING; // Default
+
+                    TokenType first = p->current.type;
+                    char *first_text = strdup(p->current.text);
                     advance(p);
-                    
+
+                    // Check for primary key immediately after name/type
                     if (match(p, TOKEN_KEYWORD_PRIMARY)) {
                         match(p, TOKEN_KEYWORD_KEY);
                         c->is_primary = 1;
                     }
 
-                    if (match(p, TOKEN_KEYWORD_INT)) {
-                        c->type = TYPE_INT;
-                    } else if (match(p, TOKEN_KEYWORD_VARCHAR)) {
-                        c->type = TYPE_STRING;
-                        if (match(p, TOKEN_LPAREN)) { // Skip (size)
-                             advance(p);
-                             match(p, TOKEN_RPAREN);
+                    if (first == TOKEN_KEYWORD_INT || first == TOKEN_KEYWORD_VARCHAR || first == TOKEN_KEYWORD_STRING) {
+                        // Type-first syntax (e.g., INT id)
+                        c->type = (first == TOKEN_KEYWORD_INT) ? TYPE_INT : TYPE_STRING;
+                        if (p->current.type == TOKEN_IDENTIFIER) {
+                            c->name = strdup(p->current.text);
+                            advance(p);
+                        } else {
+                            c->name = first_text;
+                            first_text = NULL;
+                        }
+                    } else {
+                        // Name-first syntax (e.g., id INT)
+                        c->name = first_text;
+                        first_text = NULL;
+                        if (match(p, TOKEN_KEYWORD_INT)) c->type = TYPE_INT;
+                        else if (match(p, TOKEN_KEYWORD_VARCHAR) || match(p, TOKEN_KEYWORD_STRING)) {
+                            c->type = TYPE_STRING;
+                            if (match(p, TOKEN_LPAREN)) {
+                                 advance(p); // Skip size
+                                 match(p, TOKEN_RPAREN);
+                            }
                         }
                     }
-                    
-                    if (match(p, TOKEN_KEYWORD_PRIMARY)) { // case where type is before primary key
-                        match(p, TOKEN_KEYWORD_KEY);
-                        c->is_primary = 1;
-                    }
+                    if (first_text) free(first_text);
 
-                    if (match(p, TOKEN_KEYWORD_NOT_NULL)) {
-                        c->not_null = 1;
+                    // Constraints can appear at the end too
+                    while (1) {
+                        if (match(p, TOKEN_KEYWORD_PRIMARY)) {
+                            match(p, TOKEN_KEYWORD_KEY);
+                            c->is_primary = 1;
+                        } else if (match(p, TOKEN_KEYWORD_NOT_NULL)) {
+                            c->not_null = 1;
+                        } else if (match(p, TOKEN_KEYWORD_INT)) {
+                            c->type = TYPE_INT;
+                        } else if (match(p, TOKEN_KEYWORD_VARCHAR) || match(p, TOKEN_KEYWORD_STRING)) {
+                            c->type = TYPE_STRING;
+                            if (match(p, TOKEN_LPAREN)) { advance(p); match(p, TOKEN_RPAREN); }
+                        } else {
+                            break;
+                        }
                     }
                     
                     q.num_cols++;
@@ -237,6 +271,30 @@ SQLQuery parse_query(Parser *p) {
         }
     } else if (match(p, TOKEN_KEYWORD_CLEAR) || match(p, TOKEN_KEYWORD_CLS)) {
         q.type = 8; // CLEAR
+    } else if (match(p, TOKEN_KEYWORD_DROP)) {
+        if (match(p, TOKEN_KEYWORD_DATABASE)) {
+            q.type = 9; // DROP
+            q.val = sdsnew("DATABASE");
+            if (p->current.type == TOKEN_IDENTIFIER) {
+                q.key = sdsnew(p->current.text);
+                advance(p);
+            } else {
+                set_error(p, "Expected database name after DROP DATABASE");
+            }
+        } else if (match(p, TOKEN_KEYWORD_TABLE)) {
+            q.type = 9; // DROP
+            q.val = sdsnew("TABLE");
+            if (p->current.type == TOKEN_IDENTIFIER) {
+                q.table = sdsnew(p->current.text);
+                advance(p);
+            } else {
+                set_error(p, "Expected table name after DROP TABLE");
+            }
+        } else {
+            set_error(p, "Expected DATABASE or TABLE after DROP");
+        }
+    } else if (match(p, TOKEN_KEYWORD_HELP)) {
+        q.type = 10; // HELP
     } else {
         set_error(p, "Unknown or unsupported SQL command");
     }

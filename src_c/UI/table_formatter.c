@@ -19,7 +19,9 @@ void print_table(SQLResult result) {
     for (int i = 0; i < result.num_cols; i++) {
         widths[i] = (int)strlen(result.headers[i]);
         for (int j = 0; j < result.num_rows; j++) {
-            int len = (int)strlen(result.rows[j][i]);
+            if (!result.rows[j]) continue;
+            const char *val = result.rows[j][i];
+            int len = val ? (int)strlen(val) : 6;
             if (len > widths[i]) widths[i] = len;
         }
         widths[i] += 2; // Padding
@@ -44,9 +46,11 @@ void print_table(SQLResult result) {
 
     // Print rows
     for (int i = 0; i < result.num_rows; i++) {
+        if (!result.rows[i]) continue;
         printf("|");
         for (int j = 0; j < result.num_cols; j++) {
-            printf(" %-*s |", widths[j] - 1, result.rows[i][j]);
+            const char *val = result.rows[i][j];
+            printf(" %-*s |", widths[j] - 1, val ? val : "(null)");
         }
         printf("\n");
     }

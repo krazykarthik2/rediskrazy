@@ -53,10 +53,40 @@ static void execute_redis_cmd(SQLResult *res) {
     sdsfreesplitres(argv, argc);
 
     // Read response
-    char buf[4096];
-    int n = recv(sock, buf, sizeof(buf)-1, 0);
-    if (n > 0) {
+    static char buf[65536];
+    int n = 0;
+    while (1) {
+        int r = recv(sock, buf + n, sizeof(buf) - 1 - n, 0);
+        if (r <= 0) break;
+        n += r;
         buf[n] = 0;
+        
+        // Basic check: if it's an array and we have the full first line, 
+        // we might still need more if it's long.
+        // For a hacky but effective solution, we'll wait a bit and try to read more
+        // if the buffer seems incomplete (e.g. doesn't end in \r\n).
+        if (n >= 4 && buf[n-2] == '\r' && buf[n-1] == '\n') {
+            // Check if we expect more elements based on the first line
+            if (buf[0] == '*' || buf[0] == '$') {
+                // If it's short, let's assume we might need more.
+                // In a real Redis client, we'd parse the count and read until EOF or full count.
+                // Here we'll just wait a tiny bit to see if more comes in.
+                fd_set readfds;
+                struct timeval tv = {0, 10000}; // 10ms
+                FD_ZERO(&readfds);
+                FD_SET(sock, &readfds);
+                if (select(sock + 1, &readfds, NULL, NULL, &tv) <= 0) break;
+            } else {
+                break; 
+            }
+        } else if (n > 0) {
+            // Continue reading
+        } else {
+            break;
+        }
+    }
+
+    if (n > 0) {
         
         // If it was just a PING (placeholder), don't overwrite our local results
         if (strcmp(res->redis_cmd, "PING") == 0) goto cleanup;
@@ -81,41 +111,119 @@ static void execute_redis_cmd(SQLResult *res) {
                 }
             }
         } else if (buf[0] == '*') {
-            // RESP Array (used for HGETALL result)
+            // RESP Array
             int num_elements = atoi(buf + 1);
             char *current = strstr(buf, "\r\n");
             if (!current) goto cleanup;
             current += 2;
             
-            for (int i = 0; i < num_elements; i++) {
-                if (current[0] == '$') {
-                    int len = atoi(current + 1);
+            if (res->redis_cmd && strncmp(res->redis_cmd, "HSCANALL", 8) == 0) {
+                // Nested Array: [ [f,v,f,v], [f,v,f,v], ... ]
+                res->rows = calloc(num_elements, sizeof(char**));
+                int actual_rows = 0;
+                for (int r = 0; r < num_elements; r++) {
+                    if (!current || current[0] != '*') break;
+                    
+                    int fields_val_count = atoi(current + 1);
                     current = strstr(current, "\r\n");
                     if (!current) break;
                     current += 2;
                     
-                    char *val = malloc(len + 1);
-                    memcpy(val, current, len);
-                    val[len] = '\0';
-                    current += len + 2;
-                    
-                    if (i % 2 == 1) { // Value
-                         int col_idx = i / 2;
-                         if (col_idx < res->num_cols) {
-                             free(res->rows[0][col_idx]);
-                             res->rows[0][col_idx] = val;
-                         } else {
-                             free(val);
-                         }
-                    } else {
-                         // Field name - for matching in future, for now ignore
-                         free(val);
+                    res->rows[r] = calloc(res->num_cols, sizeof(char*));
+                    for (int f = 0; f < fields_val_count/2; f++) {
+                        if (!current || current[0] != '$') break;
+                        int flen = atoi(current + 1);
+                        current = strstr(current, "\r\n");
+                        if (!current) break;
+                        current += 2;
+                        char field_name[128];
+                        int copy_len = (flen < 127) ? flen : 127;
+                        memcpy(field_name, current, copy_len); field_name[copy_len] = 0;
+                        current += flen + 2;
+                        
+                        if (!current || current[0] != '$') break;
+                        int vlen = atoi(current + 1);
+                        current = strstr(current, "\r\n");
+                        if (!current) break;
+                        current += 2;
+                        char *val = malloc(vlen + 1);
+                        memcpy(val, current, vlen); val[vlen] = 0;
+                        current += vlen + 2;
+                        
+                        // Map field to column
+                        int col_idx = -1;
+                        for(int c=0; c<res->num_cols; c++) {
+                            if(strcasecmp(res->headers[c], field_name) == 0) { col_idx = c; break; }
+                        }
+                        if(col_idx != -1) res->rows[r][col_idx] = val;
+                        else free(val);
                     }
-                } else if (current[0] == ':') { // Integer
-                    current = strstr(current, "\r\n") + 2;
+                    actual_rows++;
+                }
+                res->num_rows = actual_rows;
+            }
+ else if (res->num_cols == 1) {
+                // Multi-row result (like KEYS)
+                if (num_elements > 0) {
+                    res->rows = calloc(num_elements, sizeof(char**));
+                    int actual_rows = 0;
+                    for (int i = 0; i < num_elements; i++) {
+                        if (!current) break;
+                        if (current[0] == '$') {
+                            int len = atoi(current + 1);
+                            current = strstr(current, "\r\n");
+                            if (!current) break;
+                            current += 2;
+                            char *val = malloc(len + 1);
+                            memcpy(val, current, len); val[len] = '\0';
+                            current += len + 2;
+                            res->rows[i] = malloc(sizeof(char*) * 1);
+                            res->rows[i][0] = val;
+                            actual_rows++;
+                        } else if (current[0] == ':') {
+                            current = strstr(current, "\r\n");
+                            if (!current) break;
+                            current += 2;
+                            actual_rows++;
+                        }
+                    }
+                    res->num_rows = actual_rows;
+                }
+            } else {
+                // Single row multi-column result (HGETALL)
+                res->num_rows = 1;
+                res->rows = calloc(1, sizeof(char**));
+                res->rows[0] = calloc(res->num_cols, sizeof(char*));
+                for (int i = 0; i < num_elements; i += 2) {
+                    // Field
+                    int flen = atoi(current + 1);
+                    current = strstr(current, "\r\n");
+                    if (!current) break;
+                    current += 2;
+                    char field_name[128];
+                    int copy_len = (flen < 127) ? flen : 127;
+                    memcpy(field_name, current, copy_len); field_name[copy_len] = 0;
+                    current += flen + 2;
+
+                    // Value
+                    int vlen = atoi(current + 1);
+                    current = strstr(current, "\r\n");
+                    if (!current) break;
+                    current += 2;
+                    char *val = malloc(vlen + 1);
+                    memcpy(val, current, vlen); val[vlen] = 0;
+                    current += vlen + 2;
+                    
+                    int col_idx = -1;
+                    for(int c=0; c<res->num_cols; c++) {
+                        if(strcasecmp(res->headers[c], field_name) == 0) { col_idx = c; break; }
+                    }
+                    if(col_idx != -1) res->rows[0][col_idx] = val;
+                    else free(val);
                 }
             }
-        } else if (buf[0] == '-') {
+        }
+ else if (buf[0] == '-') {
             if (res->error) free(res->error);
             res->error = strdup(buf + 1);
         }

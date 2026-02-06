@@ -60,6 +60,53 @@ int create_table(const char *db_name, const char *table_name, Column *cols, int 
     return 0;
 }
 
+int drop_database(const char *name) {
+    for (int i = 0; i < context.num_databases; i++) {
+        if (strcmp(context.databases[i].name, name) == 0) {
+            // Free contents of DB
+            Database *db = &context.databases[i];
+            for (int j = 0; j < db->num_tables; j++) {
+                Table *t = &db->tables[j];
+                for (int k = 0; k < t->num_columns; k++) free(t->columns[k].name);
+                free(t->columns);
+                free(t->name);
+            }
+            free(db->tables);
+            free(db->name);
+
+            // Shift rest
+            for (int k = i; k < context.num_databases - 1; k++) {
+                context.databases[k] = context.databases[k + 1];
+            }
+            context.num_databases--;
+            if (context.current_db_idx == i) context.current_db_idx = -1;
+            else if (context.current_db_idx > i) context.current_db_idx--;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+int drop_table(const char *db_name, const char *table_name) {
+    Database *db = get_database(db_name);
+    if (!db) return -1;
+    for (int i = 0; i < db->num_tables; i++) {
+        if (strcmp(db->tables[i].name, table_name) == 0) {
+            Table *t = &db->tables[i];
+            for (int k = 0; k < t->num_columns; k++) free(t->columns[k].name);
+            free(t->columns);
+            free(t->name);
+
+            for (int k = i; k < db->num_tables - 1; k++) {
+                db->tables[k] = db->tables[k + 1];
+            }
+            db->num_tables--;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 Database* get_database(const char *name) {
     for (int i = 0; i < context.num_databases; i++) {
         if (strcmp(context.databases[i].name, name) == 0) return &context.databases[i];

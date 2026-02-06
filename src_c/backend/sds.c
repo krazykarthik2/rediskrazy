@@ -143,6 +143,11 @@ void sdsfreesplitres(sds *argv, int argc) {
     free(argv);
 }
 
+void sdssetlen(sds s, size_t newlen) {
+    struct sdshdr *sh = (void*)(s - sizeof(struct sdshdr));
+    sh->len = newlen;
+}
+
 // Simple split args that doesn't handle all edge cases but good enough for now
 sds* sdssplitargs(const char *line, int *argc) {
     const char *p = line;

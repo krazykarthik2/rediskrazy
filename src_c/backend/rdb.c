@@ -9,6 +9,7 @@
 #define RDB_MAGIC "REDIS0001"
 #define RDB_TYPE_STRING 0
 #define RDB_TYPE_ZSET 1
+#define RDB_TYPE_HASH 2
 #define RDB_OPCODE_EOF 255
 
 // Helpers for binary writing
@@ -37,10 +38,6 @@ static void read_double(FILE *fp, double *v) {
 static sds read_string(FILE *fp) {
     uint32_t len;
     if (fread(&len, sizeof(len), 1, fp) != 1) return NULL;
-    
-    // Safety check just in case
-    // if len is huge, malloc might fail, but sdsnewlen handles usage
-    
     char *buf = (char*)malloc(len);
     if (len > 0) {
         if (fread(buf, 1, len, fp) != len) {
@@ -48,13 +45,11 @@ static sds read_string(FILE *fp) {
             return NULL;
         }
     }
-    
     sds s = sdsnewlen(buf, len);
     free(buf);
     return s;
 }
 
-// ZSet callback for saving
 typedef struct {
     FILE *fp;
 } SaveCtx;
@@ -65,11 +60,10 @@ static void rdb_zset_cb(sds member, double score, void *arg) {
     write_string(ctx->fp, member);
 }
 
-int rdb_save(const char *filename, Dict *strings, Dict *zsets) {
+int rdb_save(const char *filename, Dict *strings, Dict *zsets, Dict *hashes) {
     FILE *fp = fopen(filename, "wb");
     if (!fp) return -1;
     
-    // Magic
     fwrite(RDB_MAGIC, 1, 9, fp);
     
     // Save Strings
@@ -97,15 +91,50 @@ int rdb_save(const char *filename, Dict *strings, Dict *zsets) {
                 if (e->expire == 0 || e->expire > time(NULL)) {
                     ZSet *z = *(ZSet**)e->val;
                     size_t card = zset_card(z);
-                    
                     fputc(RDB_TYPE_ZSET, fp); 
                     write_string(fp, e->key);
-                    
                     uint32_t c = htonl((uint32_t)card);
                     fwrite(&c, 4, 1, fp);
-                    
                     SaveCtx ctx = { fp };
                     zset_range(z, 0, -1, rdb_zset_cb, &ctx);
+                }
+                e = e->next;
+            }
+        }
+    }
+
+    // Save Hashes
+    for (int table = 0; table <= 1; table++) {
+        if (!hashes->ht[table].table) continue;
+        for (size_t i = 0; i < hashes->ht[table].size; ++i) {
+            DictEntry *e = hashes->ht[table].table[i];
+            while (e) {
+                Dict *h = *(Dict**)e->val;
+                size_t count = 0;
+                for (int t2 = 0; t2 <= 1; t2++) {
+                    if (h->ht[t2].table) {
+                        for (size_t j = 0; j < h->ht[t2].size; j++) {
+                            DictEntry *e2 = h->ht[t2].table[j];
+                            while (e2) { count++; e2 = e2->next; }
+                        }
+                    }
+                }
+
+                fputc(RDB_TYPE_HASH, fp);
+                write_string(fp, e->key);
+                write_u32(fp, (uint32_t)count);
+
+                for (int t2 = 0; t2 <= 1; t2++) {
+                    if (h->ht[t2].table) {
+                        for (size_t j = 0; j < h->ht[t2].size; j++) {
+                            DictEntry *e2 = h->ht[t2].table[j];
+                            while (e2) {
+                                write_string(fp, e2->key);
+                                write_string(fp, e2->val);
+                                e2 = e2->next;
+                            }
+                        }
+                    }
                 }
                 e = e->next;
             }
@@ -117,7 +146,7 @@ int rdb_save(const char *filename, Dict *strings, Dict *zsets) {
     return 0;
 }
 
-int rdb_load(const char *filename, Dict *strings, Dict *zsets) {
+int rdb_load(const char *filename, Dict *strings, Dict *zsets, Dict *hashes) {
     FILE *fp = fopen(filename, "rb");
     if (!fp) return -1;
     
@@ -133,38 +162,46 @@ int rdb_load(const char *filename, Dict *strings, Dict *zsets) {
         if (type == RDB_TYPE_STRING) {
             sds key = read_string(fp);
             sds val = read_string(fp);
-            if (key && val) {
-                dict_put(strings, key, val, 0);
-            }
+            if (key && val) dict_put(strings, key, val, 0);
             if (key) sdsfree(key);
             if (val) sdsfree(val);
         } else if (type == RDB_TYPE_ZSET) {
             sds key = read_string(fp);
             uint32_t count;
             read_u32(fp, &count);
-            count = ntohl(count); // Was written with htonl
-            
-            // Create ZSet
+            count = ntohl(count);
             ZSet *z = zset_create();
             sds zptr = sdsnewlen(&z, sizeof(ZSet*));
             dict_put(zsets, key, zptr, 0);
             sdsfree(zptr);
-            
             for (uint32_t i = 0; i < count; i++) {
                 double score;
                 read_double(fp, &score);
                 sds member = read_string(fp);
-                if (member) {
-                    zset_add(z, member, score);
-                    sdsfree(member);
-                }
+                if (member) { zset_add(z, member, score); sdsfree(member); }
+            }
+            if (key) sdsfree(key);
+        } else if (type == RDB_TYPE_HASH) {
+            sds key = read_string(fp);
+            uint32_t count;
+            read_u32(fp, &count);
+            Dict *h = malloc(sizeof(Dict));
+            dict_init(h, 4);
+            sds hptr = sdsnewlen(&h, sizeof(Dict*));
+            dict_put(hashes, key, hptr, 0);
+            sdsfree(hptr);
+            for (uint32_t i = 0; i < count; i++) {
+                sds f = read_string(fp);
+                sds v = read_string(fp);
+                if (f && v) dict_put(h, f, v, 0);
+                if (f) sdsfree(f);
+                if (v) sdsfree(v);
             }
             if (key) sdsfree(key);
         } else {
             break; 
         }
     }
-    
     fclose(fp);
     return 0;
 }
