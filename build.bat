@@ -14,6 +14,13 @@ if not exist "%OUTPUT_DIR%" (
     mkdir "%OUTPUT_DIR%"
 )
 
+
+rem delete all previous artifacts
+echo ========================================
+echo Deleting all previous artifacts...
+echo ========================================
+del /s /q "%OUTPUT_DIR%\*.*"
+
 echo ========================================
 echo Building Redis Clone with SQL Layer...
 echo ========================================

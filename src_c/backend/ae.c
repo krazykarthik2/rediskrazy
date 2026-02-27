@@ -312,13 +312,21 @@ int aeProcessEvents(aeEventLoop *eventLoop, int flags) {
         int fd = eventLoop->fired[j].fd;
         int rfired = 0;
         
-        if (fe->mask & mask & AE_READABLE) {
+        int invert = fe->mask & AE_BARRIER;
+
+        if (!invert && (fe->mask & mask & AE_READABLE)) {
             rfired = 1;
             fe->rfileProc(eventLoop, fd, fe->clientData, mask);
         }
         if (fe->mask & mask & AE_WRITABLE) {
-            if (!rfired || fe->wfileProc != fe->rfileProc)
+            if (!rfired || fe->wfileProc != fe->rfileProc) {
                 fe->wfileProc(eventLoop, fd, fe->clientData, mask);
+            }
+        }
+        if (invert && (fe->mask & mask & AE_READABLE)) {
+            if (!rfired || fe->wfileProc != fe->rfileProc) {
+                fe->rfileProc(eventLoop, fd, fe->clientData, mask);
+            }
         }
         processed++;
     }

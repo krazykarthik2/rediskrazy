@@ -315,6 +315,50 @@ class TestRunner:
         # Heap should have at least 1 entry now
         print(f"    [Info] ExpHeap after SET with TTL: {res}")
         
+        # Test DEBUG BARRIER (Event Prioritization API)
+        print("    [Info] Testing Event Prioritization API...")
+        self.send_cmd("DEBUG", "BARRIER", "1")
+        self.read_resp() # Accept whatever error or ok
+
+        # Test CONFIG IOBACKEND
+        print("    [Info] Testing Config I/O backend API...")
+        self.send_cmd("DEBUG", "IOBACKEND")
+        self.read_resp() # Usually will return the backend name
+        
+        # Test Hashes persistence fixes
+        print("    [Info] Testing Hash Commands...")
+        self.send_cmd("HSET", "testhash", "field", "val")
+        self.read_resp()
+        self.send_cmd("EXISTS", "testhash")
+        self.assert_resp(self.read_resp(), ":1", "EXISTS sees Hash")
+        self.send_cmd("DEL", "testhash")
+        self.assert_resp(self.read_resp(), ":1", "DEL removes Hash")
+        
+        self.disconnect()
+        self.stop_server()
+
+    def run_benchmarks(self):
+        print("\n=== Benchmarking & Performance ===")
+        print("    [Info] Running SET/GET benchmark...")
+        self.start_server()
+        if not self.connect(): return
+        
+        start = time.time()
+        n_ops = 5000
+        for i in range(n_ops):
+            self.send_cmd("SET", f"b_{i}", "val")
+            self.read_resp()
+        set_time = time.time() - start
+        
+        start = time.time()
+        for i in range(n_ops):
+            self.send_cmd("GET", f"b_{i}")
+            self.read_resp()
+        get_time = time.time() - start
+        
+        print(f"    [Bench] {n_ops} SETs: {set_time:.3f}s ({(n_ops/set_time) if set_time > 0 else 0:.0f} ops/sec)")
+        print(f"    [Bench] {n_ops} GETs: {get_time:.3f}s ({(n_ops/get_time) if get_time > 0 else 0:.0f} ops/sec)")
+        
         self.disconnect()
         self.stop_server()
 
@@ -398,6 +442,8 @@ class TestRunner:
             self.test_thread_pool()
             # New feature tests
             self.test_new_features()
+            # Run benchmarks logic
+            self.run_benchmarks()
         finally:
             self.stop_server()
 

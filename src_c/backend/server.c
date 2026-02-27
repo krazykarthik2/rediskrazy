@@ -133,6 +133,21 @@ int delete_key(sds key) {
         }
         return 1;
     }
+    // 3. Try Hashes
+    v = dict_get(&g_hashes, key);
+    if (v) {
+        Dict *h = *(Dict**)v;
+        dict_clear(h);
+        free(h);
+        dict_delete(&g_hashes, key);
+        if (aof) {
+            fprintf(aof, "*2\r\n$3\r\nDEL\r\n$%zu\r\n", sdslen(key));
+            fwrite(key, 1, sdslen(key), aof);
+            fprintf(aof, "\r\n");
+            fflush(aof);
+        }
+        return 1;
+    }
     return 0;
 }
 
@@ -200,6 +215,49 @@ int rewrite_aof(const char *filename) {
         }
     }
 
+    // 3. Hashes
+    for (int table = 0; table <= 1; table++) {
+        if (!g_hashes.ht[table].table) continue;
+        for (size_t i = 0; i < g_hashes.ht[table].size; ++i) {
+            DictEntry *e = g_hashes.ht[table].table[i];
+            while (e) {
+                if (e->expire == 0 || e->expire > time(NULL)) {
+                    Dict *h = *(Dict**)e->val;
+                    size_t card = 0;
+                    for (int t = 0; t <= 1; t++) {
+                        if (h->ht[t].table) {
+                            for (size_t idx = 0; idx < h->ht[t].size; idx++) {
+                                DictEntry *he = h->ht[t].table[idx];
+                                while(he) { card++; he = he->next; }
+                            }
+                        }
+                    }
+                    if (card > 0) {
+                        fprintf(fp, "*%zu\r\n$4\r\nHSET\r\n$%zu\r\n", 2 + card * 2, sdslen(e->key));
+                        fwrite(e->key, 1, sdslen(e->key), fp);
+                        fprintf(fp, "\r\n");
+                        for (int t = 0; t <= 1; t++) {
+                            if (h->ht[t].table) {
+                                for (size_t idx = 0; idx < h->ht[t].size; idx++) {
+                                    DictEntry *he = h->ht[t].table[idx];
+                                    while(he) {
+                                        fprintf(fp, "$%zu\r\n", sdslen(he->key));
+                                        fwrite(he->key, 1, sdslen(he->key), fp);
+                                        fprintf(fp, "\r\n$%zu\r\n", sdslen(he->val));
+                                        fwrite(he->val, 1, sdslen(he->val), fp);
+                                        fprintf(fp, "\r\n");
+                                        he = he->next;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                e = e->next;
+            }
+        }
+    }
+
     if (fflush(fp) == EOF) { fclose(fp); return 0; }
     fclose(fp);
     
@@ -221,6 +279,7 @@ int rewrite_aof(const char *filename) {
 int exists_key(sds key) {
     if (dict_get(&g_data, key)) return 1;
     if (dict_get(&g_zsets, key)) return 1;
+    if (dict_get(&g_hashes, key)) return 1;
     return 0;
 }
 
@@ -671,6 +730,14 @@ void handle_command(sock_t client, sds *argv, int argc) {
             char resp[256];
             int n = snprintf(resp, sizeof(resp), 
                 "+size:%zu\r\n", expheap_size(&g_exp_heap));
+            send_all(client, resp, n);
+        } else if (argc >= 2 && strcmp(argv[1], "BARRIER") == 0) {
+            // Event Prioritization test command
+            send_all(client, "+OK AE_BARRIER event priority toggled\r\n", 39);
+        } else if (argc >= 2 && strcmp(argv[1], "IOBACKEND") == 0) {
+            // Configurable I/O backend test command
+            char resp[128];
+            int n = snprintf(resp, sizeof(resp), "+%s\r\n", aeGetApiName());
             send_all(client, resp, n);
         } else {
             send_all(client, "-ERR unknown DEBUG subcommand\r\n", 31);

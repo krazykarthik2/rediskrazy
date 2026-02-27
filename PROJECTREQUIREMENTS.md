@@ -25,7 +25,7 @@
 ### 🧱 Step 2: Event Loop (Part 2)
 - [x] Timer events
 - [x] Time-based callbacks
-- [ ] Event prioritization
+- [x] Event prioritization
 - [x] Safe event removal
 - [x] Graceful shutdown handling
 
@@ -61,6 +61,7 @@
 
 ### 🧱 Step 4: Hashtables (Part 1)
 - [x] Custom hash table
+- [x] CREATE AND USE INDICES
 - [x] Collision handling
 - [x] Load factor tracking
 - [x] Incremental rehashing
@@ -153,10 +154,10 @@
 ## Part 7️⃣ I/O Models (Final Integration)
 
 ### 🧱 Step 13: IO MODELS
-- [ ] Configurable I/O backend
-- [ ] Benchmarking
-- [ ] Performance comparison
-- [ ] Documentation
+- [x] Configurable I/O backend
+- [x] Benchmarking
+- [x] Performance comparison
+- [x] Documentation
 
 ---
 

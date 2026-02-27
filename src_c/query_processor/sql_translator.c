@@ -54,8 +54,8 @@ SQLResult translate_query(SQLQuery q, const char *parser_error) {
                 res.rows[0] = malloc(sizeof(char*) * t->num_columns);
                 for(int i=0; i<t->num_columns; i++) res.rows[0][i] = strdup("PENDING");
             } else {
-                if (q.table) snprintf(buf, sizeof(buf), "GET %s:%s:%s", db_name, q.table, q.key);
-                else snprintf(buf, sizeof(buf), "GET %s", q.key);
+                if (q.table) return make_error("Table does not exist");
+                snprintf(buf, sizeof(buf), "GET %s", q.key);
                 res.redis_cmd = strdup(buf);
                 res.num_cols = 2;
                 res.headers = malloc(sizeof(char*) * 2);
@@ -107,9 +107,9 @@ SQLResult translate_query(SQLQuery q, const char *parser_error) {
                 res.redis_cmd = strdup(hset_cmd);
                 sdsfree(hset_cmd);
             } else {
+                if (q.table) return make_error("Table does not exist");
                 if (!q.key || !q.val) return make_error("INSERT requires key and value");
-                if (q.table) snprintf(buf, sizeof(buf), "SET %s:%s:%s %s", db_name, q.table, q.key, q.val);
-                else snprintf(buf, sizeof(buf), "SET %s %s", q.key, q.val);
+                snprintf(buf, sizeof(buf), "SET %s %s", q.key, q.val);
                 res.redis_cmd = strdup(buf);
             }
             
@@ -125,6 +125,7 @@ SQLResult translate_query(SQLQuery q, const char *parser_error) {
         case 2: // DELETE
             if (!q.key) return make_error("DELETE requires a WHERE key = '...' clause");
             if (q.table) {
+                if (!db || !get_table(db, q.table)) return make_error("Table does not exist");
                 snprintf(buf, sizeof(buf), "DEL %s:%s:%s", db_name, q.table, q.key);
             } else {
                 snprintf(buf, sizeof(buf), "DEL %s", q.key);
@@ -143,6 +144,7 @@ SQLResult translate_query(SQLQuery q, const char *parser_error) {
         case 3: // UPDATE
             if (!q.key || !q.val) return make_error("UPDATE requires SET val = '...' and WHERE key = '...'");
             if (q.table) {
+                if (!db || !get_table(db, q.table)) return make_error("Table does not exist");
                 snprintf(buf, sizeof(buf), "SET %s:%s:%s %s", db_name, q.table, q.key, q.val);
             } else {
                 snprintf(buf, sizeof(buf), "SET %s %s", q.key, q.val);
