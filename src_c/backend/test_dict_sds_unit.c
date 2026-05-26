@@ -4,7 +4,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
+#ifdef _WIN32
 #include <windows.h> // For Sleep
+#else
+#include <unistd.h>
+#define Sleep(ms) usleep((ms) * 1000)
+#endif
 
 void test_basic_ops() {
     printf("Testing Basic Ops...\n");

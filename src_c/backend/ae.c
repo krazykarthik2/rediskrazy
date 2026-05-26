@@ -125,6 +125,31 @@ void aeStop(aeEventLoop *eventLoop) {
     eventLoop->stop = 1;
 }
 
+int aeResizeEventLoop(aeEventLoop *eventLoop, int setsize) {
+    int i;
+
+    if (setsize == eventLoop->setsize) return AE_OK;
+    if (eventLoop->maxfd >= setsize) return AE_ERR;
+    if (aeApiResize(eventLoop, setsize) == -1) return AE_ERR;
+
+    aeFileEvent *new_events = realloc(eventLoop->events, sizeof(aeFileEvent) * setsize);
+    aeFiredEvent *new_fired = realloc(eventLoop->fired, sizeof(aeFiredEvent) * setsize);
+    if (!new_events || !new_fired) {
+        if (new_events) eventLoop->events = new_events;
+        if (new_fired) eventLoop->fired = new_fired;
+        return AE_ERR;
+    }
+    eventLoop->events = new_events;
+    eventLoop->fired = new_fired;
+    eventLoop->setsize = setsize;
+
+    /* Make sure that if we created new slots, they are initialized with
+     * AE_NONE. */
+    for (i = eventLoop->maxfd + 1; i < setsize; i++)
+        eventLoop->events[i].mask = AE_NONE;
+    return AE_OK;
+}
+
 int aeCreateFileEvent(aeEventLoop *eventLoop, int fd, int mask,
         aeFileProc *proc, void *clientData)
 {
