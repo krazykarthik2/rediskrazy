@@ -31,11 +31,6 @@ pushd "$BACKEND_DIR" >/dev/null
 gcc -O2 -Wall -Wextra dict.c rdb.c ae.c resp.c avl.c zset.c tpool.c sds.c mempool.c expheap.c aofbuf.c server.c -o "$OUTPUT_DIR/server"
 popd >/dev/null
 echo "[SUCCESS] Server compiled to $OUTPUT_DIR/server"
-
-echo "Compiling SQL Processor shared object..."
-gcc -shared -fPIC -O2 -Wall -Wextra "$QP_DIR/sql_parser.c" "$QP_DIR/sql_lexer.c" "$QP_DIR/sql_parser_internal.c" "$QP_DIR/sql_translator.c" "$QP_DIR/schema_manager.c" "$QP_DIR/py_interface.c" "$BACKEND_DIR/sds.c" -o "$OUTPUT_DIR/sql_processor.so"
-echo "[SUCCESS] SQL Processor compiled to $OUTPUT_DIR/sql_processor.so"
-
 echo "Compiling Query Processor Server..."
 gcc -O2 -Wall -Wextra "$QP_DIR/sql_parser.c" "$QP_DIR/sql_lexer.c" "$QP_DIR/sql_parser_internal.c" "$QP_DIR/sql_translator.c" "$QP_DIR/schema_manager.c" "$QP_DIR/qp_server.c" "$BACKEND_DIR/sds.c" -o "$OUTPUT_DIR/qp_server"
 echo "[SUCCESS] Query Processor Server compiled to $OUTPUT_DIR/qp_server"
