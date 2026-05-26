@@ -37,15 +37,6 @@ if errorlevel 1 (
 popd
 echo [SUCCESS] Server compiled to %OUTPUT_DIR%\server.exe
 
-rem Compile SQL Processor Shared Library (DLL) for Python wrapper
-echo Compiling SQL Processor DLL...
-gcc -shared -O2 -Wall -Wextra "%QP_DIR%\sql_parser.c" "%QP_DIR%\sql_lexer.c" "%QP_DIR%\sql_parser_internal.c" "%QP_DIR%\sql_translator.c" "%QP_DIR%\schema_manager.c" "%QP_DIR%\py_interface.c" "%BACKEND_DIR%\sds.c" -o "%OUTPUT_DIR%\sql_processor.dll" -lws2_32
-if errorlevel 1 (
-    echo [ERROR] Failed to compile SQL Processor DLL.
-    exit /b 1
-)
-echo [SUCCESS] SQL Processor DLL compiled to %OUTPUT_DIR%\sql_processor.dll
-
 rem Compile Query Processor Server (qp_server)
 echo Compiling Query Processor Server...
 gcc -O2 -Wall -Wextra "%QP_DIR%\sql_parser.c" "%QP_DIR%\sql_lexer.c" "%QP_DIR%\sql_parser_internal.c" "%QP_DIR%\sql_translator.c" "%QP_DIR%\schema_manager.c" "%QP_DIR%\qp_server.c" "%BACKEND_DIR%\sds.c" -o "%OUTPUT_DIR%\qp_server.exe" -lws2_32
