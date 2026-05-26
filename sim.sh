@@ -33,9 +33,9 @@ echo "===================================================="
 echo "STEP 3: Starting Redis Server for CLI..."
 echo "===================================================="
 
-"$EXEC_DIR/server" > server.log 2>&1 &
+"$EXEC_DIR/server.exe" > server.log 2>&1 &
 SERVER_PID=$!
-"$EXEC_DIR/qp_server" > qp_server.log 2>&1 &
+"$EXEC_DIR/qp_server.exe" > qp_server.log 2>&1 &
 QP_PID=$!
 sleep 3
 
@@ -59,7 +59,7 @@ if [ "$choice" = "2" ]; then
 else
     echo ""
     echo "Starting SQL CLI Layer..."
-    "$EXEC_DIR/sql_cli"
+    "$EXEC_DIR/sql_cli.exe"
 fi
 
 echo ""
