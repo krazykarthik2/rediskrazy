@@ -8,6 +8,7 @@ typedef SOCKET sock_t;
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <unistd.h>
@@ -15,6 +16,8 @@ typedef SOCKET sock_t;
 typedef int sock_t;
 #define INVALID_SOCKET (-1)
 #define SOCKET_ERROR (-1)
+#define closesocket close
+#define WSACleanup() ((void)0)
 #endif
 
 #include <stdio.h>
