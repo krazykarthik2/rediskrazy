@@ -5,7 +5,10 @@ import os
 print("Starting Build...")
 cmd = [
     "gcc", "-O2", "-Wall", "-Wextra",
-    r"src_c\dict.c", r"src_c\rdb.c", r"src_c\ae.c", r"src_c\resp.c", r"src_c\avl.c", r"src_c\zset.c", r"src_c\tpool.c", r"src_c\server.c",
+    r"src_c\backend\dict.c", r"src_c\backend\rdb.c", r"src_c\backend\ae.c",
+    r"src_c\backend\resp.c", r"src_c\backend\avl.c", r"src_c\backend\zset.c",
+    r"src_c\backend\tpool.c", r"src_c\backend\sds.c", r"src_c\backend\mempool.c",
+    r"src_c\backend\expheap.c", r"src_c\backend\aofbuf.c", r"src_c\backend\server.c",
     "-o", r"execs\server.exe", "-lws2_32"
 ]
 result = subprocess.run(cmd, capture_output=True, text=True)

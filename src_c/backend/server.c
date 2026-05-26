@@ -80,6 +80,10 @@ static int send_all(sock_t s, const char *buf, int len) {
     return sent;
 }
 
+static int send_reply(sock_t s, const char *str) {
+    return send_all(s, str, (int)strlen(str));
+}
+
 // Wrapper for Dict operations with AOF logging
 // key and val are SDS.
 void set_kv(sds key, sds val, time_t ttl_seconds) {
@@ -978,7 +982,7 @@ void handle_command(sock_t client, sds *argv, int argc) {
             sdsfree(search_prefix);
         }
     } else {
-        send_all(client, "-ERR unknown command\r\n", 24);
+        send_reply(client, "-ERR unknown command\r\n");
     }
 }
 

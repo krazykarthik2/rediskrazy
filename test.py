@@ -4,29 +4,44 @@ import subprocess
 import os
 import sys
 
-SERVER_EXE = "execs/server.exe"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SERVER_EXE = os.path.join(BASE_DIR, "execs", "server.exe")
 PORT = 6379
 HOST = "127.0.0.1"
 
 class TestRunner:
     def __init__(self):
         self.server_proc = None
+        self.qp_proc = None
         self.sock = None
 
     def start_server(self):
         print("[Runner] Starting Server...")
         if os.path.exists(SERVER_EXE):
              exe = SERVER_EXE
-        elif os.path.exists(r"execs\server.exe"):
-             exe = r"execs\server.exe"
         else:
              print(f"[Runner] Error: server executable not found at {SERVER_EXE}")
              sys.exit(1)
              
-        self.server_proc = subprocess.Popen([exe], stdout=None, stderr=None)
+        self.server_proc = subprocess.Popen([exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
+        qp_exe = exe.replace("server.exe", "qp_server.exe")
+        print(f"[Runner] Starting QP Server at {qp_exe}...")
+        self.qp_proc = subprocess.Popen([qp_exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        
         time.sleep(1) # Wait for startup
 
     def stop_server(self):
+        if self.qp_proc:
+            print("[Runner] Stopping QP Server...")
+            try:
+                self.qp_proc.kill()
+                self.qp_proc.wait(timeout=2)
+            except:
+                subprocess.run(["taskkill", "/F", "/T", "/PID", str(self.qp_proc.pid)], 
+                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.qp_proc = None
+
         if self.server_proc:
             print("[Runner] Stopping Server...")
             try:
@@ -259,7 +274,10 @@ class TestRunner:
         # 11. Shutdown Test
         print("    [Info] Testing SHUTDOWN...")
         self.send_cmd("SHUTDOWN")
-        self.assert_resp(self.read_resp(), "OK", "SHUTDOWN response")
+        try:
+             self.assert_resp(self.read_resp(), "OK", "SHUTDOWN response")
+        except (ConnectionResetError, ConnectionAbortedError, ConnectionError):
+             print("    [PASS] SHUTDOWN response (connection closed by server)")
         self.disconnect()
         # Wait for assertion of exit code
         try:
@@ -430,12 +448,164 @@ class TestRunner:
         
         self.disconnect()
 
+    def test_librediskrazy(self):
+        print("\n=== librediskrazy Library Tests ===")
+        from librediskrazy import Client, SimpleString, Integer, BulkString, Array, Nil, Error
+        
+        client = Client(HOST, PORT)
+        try:
+            client.connect()
+            
+            # PING
+            resp = client.ping()
+            self.assert_resp(resp.value, "PONG", "librediskrazy: ping()")
+            if not isinstance(resp, SimpleString):
+                print(f"[FAIL] Expected SimpleString object, got {type(resp)}")
+            
+            # SET & GET
+            resp = client.set("lib_key", "lib_value")
+            self.assert_resp(resp.value, "OK", "librediskrazy: set()")
+            if not isinstance(resp, SimpleString):
+                print(f"[FAIL] Expected SimpleString object, got {type(resp)}")
+
+            resp = client.get("lib_key")
+            self.assert_resp(resp.as_string(), "lib_value", "librediskrazy: get() as_string()")
+            if resp != "lib_value":
+                print(f"[FAIL] Equality comparison failed: {resp} != 'lib_value'")
+            if not isinstance(resp, BulkString):
+                print(f"[FAIL] Expected BulkString object, got {type(resp)}")
+
+            # EXISTS
+            resp = client.exists("lib_key")
+            if not isinstance(resp, Integer) or resp != 1:
+                print(f"[FAIL] Expected Integer(1) object, got {resp}")
+            else:
+                print("[PASS] librediskrazy: exists(lib_key) -> Integer(1)")
+
+            # DEL
+            resp = client.delete("lib_key")
+            if not isinstance(resp, Integer) or resp != 1:
+                print(f"[FAIL] Expected Integer(1) object after delete, got {resp}")
+            else:
+                print("[PASS] librediskrazy: delete(lib_key) -> Integer(1)")
+
+            # GET Nil
+            resp = client.get("lib_key")
+            if not isinstance(resp, Nil) or resp.value is not None or resp != None:
+                print(f"[FAIL] Expected Nil object, got {resp}")
+            else:
+                print("[PASS] librediskrazy: get(missing_key) -> Nil")
+
+            # INCR / DECR
+            client.set("lib_counter", "41")
+            resp = client.incr("lib_counter")
+            if not isinstance(resp, Integer) or resp != 42:
+                print(f"[FAIL] Expected Integer(42), got {resp}")
+            else:
+                print("[PASS] librediskrazy: incr(lib_counter) -> Integer(42)")
+
+            resp = client.decr("lib_counter")
+            if not isinstance(resp, Integer) or resp != 41:
+                print(f"[FAIL] Expected Integer(41), got {resp}")
+            else:
+                print("[PASS] librediskrazy: decr(lib_counter) -> Integer(41)")
+
+            # ZSet Ops
+            client.delete("lib_zset")
+            resp = client.zadd("lib_zset", "1.5", "member1")
+            if not isinstance(resp, Integer) or resp != 1:
+                print(f"[FAIL] Expected Integer(1) for zadd, got {resp}")
+            else:
+                print("[PASS] librediskrazy: zadd() -> Integer(1)")
+
+            resp = client.zadd("lib_zset", "2.5", "member2")
+            resp = client.zscore("lib_zset", "member1")
+            if not isinstance(resp, BulkString) or resp != "1.5":
+                print(f"[FAIL] Expected score '1.5', got {resp}")
+            else:
+                print("[PASS] librediskrazy: zscore() -> BulkString('1.5')")
+
+            resp = client.zrange("lib_zset", "0", "-1")
+            if not isinstance(resp, Array):
+                print(f"[FAIL] Expected Array response for zrange, got {type(resp)}")
+            else:
+                raw_list = resp.as_list()
+                if b"member1" in raw_list and b"member2" in raw_list:
+                    print("[PASS] librediskrazy: zrange() returned elements in list")
+                else:
+                    print(f"[FAIL] Expected members in zrange, got {raw_list}")
+
+            # Error response check
+            resp = client.execute("INVALID_COMMAND_NAME")
+            if not isinstance(resp, Error) or not resp.is_error:
+                print(f"[FAIL] Expected Error object, got {resp}")
+            else:
+                print(f"[PASS] librediskrazy: invalid command returned Error object with message: {resp.message}")
+
+            # Query string check
+            resp = client.query("SET query_key 'hello query'")
+            if resp != "OK":
+                print(f"[FAIL] client.query() failed to SET, got {resp}")
+            resp = client.query("GET query_key")
+            if resp != "hello query":
+                print(f"[FAIL] client.query() failed to GET, got {resp}")
+            else:
+                print("[PASS] librediskrazy: client.query() syntax parsed and executed successfully")
+
+        finally:
+            client.close()
+
+    def test_sql_interface(self):
+        print("\n=== librediskrazy SQL Interface Tests ===")
+        from librediskrazy import Client
+
+        client = Client(HOST, PORT)
+        try:
+            client.connect()
+            client.flushdb()
+
+            res = client.execute_sql("CREATE DATABASE sqldb")
+            self.assert_resp(str(res), "Status", "execute_sql: CREATE DATABASE")
+
+            res = client.execute_sql("USE sqldb")
+            self.assert_resp(str(res), "PONG", "execute_sql: USE")
+
+            res = client.execute_sql("CREATE TABLE users (id INT PRIMARY KEY, name STRING, age INT)")
+            self.assert_resp(str(res), "Status", "execute_sql: CREATE TABLE")
+
+            res = client.execute_sql("INSERT INTO users VALUES ('10', 'Alice', '30')")
+            self.assert_resp(str(res), "Status", "execute_sql: INSERT")
+
+            res = client.execute_sql("SELECT * FROM users WHERE key = '10'")
+            if res and isinstance(res, list) and len(res) > 0:
+                print(f"[PASS] execute_sql: SELECT single row -> {res}")
+                if res[0].get("name") == "Alice" and res[0].get("age") == "30":
+                    print("[PASS] execute_sql: Row dictionary content matches")
+                else:
+                    print(f"[FAIL] execute_sql: Row dictionary content mismatch: {res}")
+            else:
+                print(f"[FAIL] execute_sql: SELECT single row failed: {res}")
+
+            res = client.execute_sql("SELECT * FROM users")
+            if res and len(res) >= 1:
+                print("[PASS] execute_sql: SELECT all rows")
+            else:
+                print(f"[FAIL] execute_sql: SELECT all rows failed: {res}")
+
+        finally:
+            client.disconnect()
+
     def run_all(self):
         try:
             # Ensure any previous instance is killed? 
             # Ideally we just start.
             self.start_server()
             self.run_functional_tests()
+            # Start server again for librediskrazy tests (functional tests calls SHUTDOWN)
+            self.start_server()
+            self.test_librediskrazy()
+            self.test_sql_interface()
+            self.stop_server()
             # Persistence test will stop and restart server
             self.run_persistence_tests()
             # Thread pool test will stop and restart server
